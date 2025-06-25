@@ -1,0 +1,30 @@
+app:
+  title: Video Tube Generator
+  debug: false
+ai:
+  openai_api_key: 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
+  gemini_api_key: AIzaSyD_vlawUK4jvt8ZQq38BZdJh-mZCkMcPJ0
+  replicate_api_key: "r8_G1uMx5pxBkF3jmkTxewqHCtuW70dmyc2pA9cg"
+  ollama_base_url: http://localhost:11434
+  default_models:
+    openai: gpt-4.1-nano-2025-04-14
+    openai_list:
+    - gpt-4.1-nano-2025-04-14
+    - o4-mini
+    - gpt-4o
+    gemini: models/gemini-2.5-pro-exp-03-25
+    gemini_list:
+    - models/gemini-2.5-pro-exp-03-25
+    - models/gemini-2.0-flash
+    ollama: llama3:latest
+    ollama_list:
+    - llama3:latest
+    image: flux-schnell
+    voice: es-MX-JorgeNeural
+storage:
+  type: local
+  local_path: ./projects
+  firebase_config: {}
+video:
+  default_resolution: 1080p
+  default_fps: 30

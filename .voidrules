@@ -1,0 +1,42 @@
+# Configuración para generación de videos
+video_generation:
+  # Calidad y formato
+  quality:
+    resolution: "1920x1080"
+    bitrate: "5000k"
+    audio_bitrate: "192k"
+    output_format: "mp4"
+
+  # Opciones de audio
+  audio:
+    background_music: "background_music/Yoga Style - Chris Haugen.mp3"
+    normalize_volume: true
+    match_video_duration: true
+
+  # Efectos y overlays
+  effects:
+    overlays:
+      - name: "overlays/sparkes_vonv_lossy.webm"
+        opacity: 0.3
+        position: "center"
+        loop: true
+
+  # Subtítulos
+  subtitles:
+    font: "Arial"
+    font_size: 24
+    font_color: "#FFFFFF"
+    outline_color: "#000000"
+    position: "bottom"
+    enable: true
+
+  # Generación por lotes
+  batch_processing:
+    max_parallel_videos: 3
+    auto_cleanup: true
+
+  # Rutas críticas
+  paths:
+    assets: "overlays/"
+    audio_source: "data/"
+    output_dir: "output/"
