@@ -19,10 +19,7 @@ def show_overlays_ui() -> List[Tuple[str, float, float, Optional[float]]]:
         st.warning("No se encontraron overlays en la carpeta 'overlays'. Por favor, añade algunos archivos de video.")
         return []
     
-    # Mostrar overlays disponibles con información
-    st.write("**Overlays disponibles:**")
-    for overlay in available_overlays:
-        st.write(f"• {overlay}")
+
     
     # Selección de overlays
     selected_overlays = st.multiselect(

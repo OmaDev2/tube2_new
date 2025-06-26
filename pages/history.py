@@ -68,7 +68,7 @@ def show_history():
             with col1:
                 if st.button("🔄 Reabrir", key=f"reopen_{project.get('id')}"):
                     st.session_state.current_project = project
-                    st.experimental_rerun()
+                    st.rerun()
             
             with col2:
                 if st.button("📤 Exportar", key=f"export_{project.get('id')}"):
@@ -77,7 +77,7 @@ def show_history():
             with col3:
                 if st.button("🗑️ Eliminar", key=f"delete_{project.get('id')}"):
                     delete_project(project)
-                    st.experimental_rerun()
+                    st.rerun()
 
 def export_project(project):
     """Exporta un proyecto a un archivo ZIP"""

@@ -80,9 +80,30 @@ def _render_script_options_section(app_config, project_info):
         
     return script_config
 
-def _render_image_options_section(app_config):
-    """Renderiza las opciones para la generación de imágenes."""
-    st.subheader("3. Imágenes")
+def _render_scenes_and_image_options_section(app_config):
+    """Renderiza las opciones para segmentación de escenas y generación de imágenes."""
+    st.subheader("3. Escenas y Imágenes")
+    
+    # Configuración del método de segmentación
+    st.write("**Método de Segmentación de Escenas:**")
+    col_seg1, col_seg2 = st.columns([2, 1])
+    
+    with col_seg1:
+        segmentation_mode = st.selectbox(
+            "Método de Segmentación",
+            ["Por Duración (Basado en Audio)", "Automático (Texto)"],
+            index=0,  # Por defecto el mejor método
+            key="vg_segmentation_mode",
+            help="• Por Duración: Usa timestamps de transcripción para sincronizar perfectamente (RECOMENDADO)\n• Automático: Divide el texto por párrafos/caracteres"
+        )
+    
+    with col_seg2:
+        if segmentation_mode == "Por Duración (Basado en Audio)":
+            st.success("🎯 Método Óptimo")
+            st.caption("✅ Sincronización perfecta\n✅ Compensa transiciones\n✅ Timestamps precisos")
+        else:
+            st.warning("⚠️ Método Básico")
+            st.caption("❌ Sin sincronización temporal\n❌ Duración fija por escena")
     
     # Configuración de proveedor de prompts de imagen
     st.write("**Generación de Prompts de Imagen:**")
@@ -156,7 +177,7 @@ def _render_image_options_section(app_config):
         st.warning(f"No se pudieron cargar los prompts de imágenes: {e}")
         image_config['prompt_obj'] = None
         
-    return image_config
+    return image_config, segmentation_mode
 
 def _render_video_audio_options_section(app_config):
     """Renderiza las opciones de configuración de video y audio."""
@@ -286,7 +307,7 @@ def render_video_generator(app_config):
     # Renderizar secciones
     project_info = _render_project_config_section()
     script_config = _render_script_options_section(app_config, project_info)
-    image_config = _render_image_options_section(app_config)
+    image_config, segmentation_mode = _render_scenes_and_image_options_section(app_config)
     video_config, audio_config = _render_video_audio_options_section(app_config)
     subtitles_config = _render_subtitles_options_section()
     
@@ -297,6 +318,9 @@ def render_video_generator(app_config):
         **project_info,
         "script": script_config,
         "image": image_config,
+        "scenes_config": {
+            "segmentation_mode": segmentation_mode
+        },
         "video": video_config,
         "audio": audio_config,
         "subtitles": subtitles_config

@@ -20,6 +20,11 @@ import yaml
 import json
 from typing import Dict, List, Optional
 
+# --- AÑADIR PROJECT_ROOT ---
+# Definir la ruta raíz del proyecto para construir rutas absolutas y robustas
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# --------------------
+
 # --- Importaciones Directas de Servicios ---
 try:
     from utils.ai_services import AIServices
@@ -430,6 +435,11 @@ class VideoProcessor:
                             # Fallback si no hay segmentos para esta imagen
                             scene_durations.append(5.0)
                     
+                    # MEJORA: Añadir 1 segundo extra al final para evitar terminación abrupta
+                    if scene_durations:
+                        scene_durations[-1] += 1.0  # Añadir 1 segundo a la última imagen
+                        logger.info(f"[{project_id}] Añadido 1 segundo extra a la última imagen para suavizar el final")
+                    
                     # CORRECCIÓN: Ajustar duraciones para compensar efectos
                     # El video debe durar lo suficiente para que no haya fade out antes del final del audio
                     total_scene_duration = sum(scene_durations)
@@ -467,6 +477,11 @@ class VideoProcessor:
                     default_duration = video_config_ui.get('duration_per_image_manual', 10.0)
                     scene_durations = [default_duration] * num_images
                     logger.warning(f"[{project_id}] Usando duración fija de {default_duration}s por imagen")
+                
+                # MEJORA: Añadir 1 segundo extra al final también en fallback
+                if scene_durations:
+                    scene_durations[-1] += 1.0  # Añadir 1 segundo a la última imagen
+                    logger.info(f"[{project_id}] Añadido 1 segundo extra a la última imagen (fallback) para suavizar el final")
             
             if not scene_durations:
                 raise ValueError("No se pudieron determinar duraciones para las escenas")
@@ -505,6 +520,7 @@ class VideoProcessor:
             
             logger.info(f"[{project_id}] Aplicando audio principal (TTS)...")
             # Usar la variable audio_config_ui que ya contiene full_config.get("audio", {})
+            logger.info(f"[{project_id}] DEBUG ANTES DE _apply_audio: audio_config_ui = {audio_config_ui}")
             final_video_clip = self._apply_audio(final_video_clip, project_info, audio_config_ui)
             project_info["status"] = "post_audio_ok"; self._save_project_info(base_path, project_info)
             
@@ -528,6 +544,9 @@ class VideoProcessor:
                         # Obtener config de subtítulos de .voidrules como fallback
                         font_conf_void = self.video_gen_config.get('subtitles', {})
                         
+                        # Obtener fade_out_duration para sincronizar subtítulos
+                        fade_out_duration = video_config_ui.get('fade_out', 0)
+                        
                         subtitled_clip_candidate = self.video_service.add_hardcoded_subtitles(
                             video_clip=final_video_clip, 
                             segments=split_segments_for_subs,
@@ -536,7 +555,8 @@ class VideoProcessor:
                             color=subtitles_config_ui.get('color', font_conf_void.get('font_color', '#FFFFFF')),
                             stroke_color=subtitles_config_ui.get('stroke_color', font_conf_void.get('outline_color', '#000000')),
                             stroke_width=subtitles_config_ui.get('stroke_width', font_conf_void.get('stroke_width', 1.5)), # Ajustado default
-                            position=subtitles_config_ui.get('position', font_conf_void.get('position', 'bottom'))
+                            position=subtitles_config_ui.get('position', font_conf_void.get('position', 'bottom')),
+                            fade_out_duration=fade_out_duration  # NUEVO: Sincronizar fade out con video
                         )
                         if subtitled_clip_candidate:
                              # Antes de asignar, cerrar el anterior si es diferente y no es el base_video_clip_obj
@@ -555,216 +575,117 @@ class VideoProcessor:
             project_info["status"] = "post_subtitles_ok"; self._save_project_info(base_path, project_info)
 
 
-            # --- 8. Final Save --- 
+            # --- 8. Final Save ---
             logger.info(f"[{project_id}] Guardando video final...")
-            # Definir final_video_path aquí, como en el código original
             output_filename = f"{project_id}_final{'_subtitled' if project_info.get('subtitled_video_generated') else ''}.mp4"
             final_video_path = base_path / "video" / output_filename
 
-            quality_settings = self.video_gen_config.get('quality', {})
-            logger.info(f"[{project_id}] Configuración de calidad para guardado: {quality_settings}")
-
-            if final_video_clip is None:
-                logger.error(f"[{project_id}] ¡ERROR CRÍTICO! final_video_clip es None ANTES de write_videofile.")
-                raise ValueError(f"[{project_id}] final_video_clip no puede ser None para write_videofile.")
-            
-            # Mejorar el manejo del audio para evitar errores de FFmpeg
-            if final_video_clip.audio and final_video_clip.duration is not None:
-                try:
-                    audio_duration = final_video_clip.audio.duration
-                    video_duration = final_video_clip.duration
-                    
-                    if audio_duration is not None and abs(video_duration - audio_duration) > 0.1:
-                        logger.warning(f"[{project_id}] Ajustando duración del audio ({audio_duration:.2f}s) a la del video ({video_duration:.2f}s)")
-                        
-                        # Crear un nuevo clip de audio con la duración correcta
-                        if audio_duration > video_duration:
-                             # Si el audio es más largo, cortarlo
-                            adjusted_audio = final_video_clip.audio.subclip(0, video_duration)
-                            final_video_clip = final_video_clip.set_audio(adjusted_audio)
-                        else:
-                             # Si el audio es más corto, extenderlo usando loop o padding
-                            from moviepy.audio.fx import afx
-                             # Mejor usar loop en lugar de set_duration para evitar problemas
-                            if audio_duration > 0:
-                                loops_needed = int(video_duration / audio_duration) + 1
-                                extended_audio = final_video_clip.audio
-                                for _ in range(loops_needed - 1):
-                                    extended_audio = concatenate_audioclips([extended_audio, final_video_clip.audio])
-                                adjusted_audio = extended_audio.subclip(0, video_duration)
-                                final_video_clip = final_video_clip.set_audio(adjusted_audio)
-                        
-                        logger.info(f"[{project_id}] Audio ajustado exitosamente")
-                        
-                except Exception as e_audio:
-                    logger.error(f"[{project_id}] Error ajustando audio: {e_audio}. Removiendo audio del video.")
-                    # Si hay problemas con el audio, crear video sin audio
-                    final_video_clip = final_video_clip.without_audio()
-
-            # Guardar video con estrategia mejorada para audio
             try:
-                logger.info(f"[{project_id}] Iniciando guardado del video final...")
+                # 1. Preparar rutas de los componentes
+                temp_video_path = base_path / "video" / f"{project_id}_temp_video.mp4"
+                tts_audio_path = project_info.get('audio_path')
                 
-                # Verificar si hay audio antes de intentar guardarlo
-                has_audio = final_video_clip.audio is not None
-                logger.info(f"[{project_id}] Video tiene audio: {has_audio}")
+                # Esta es la clave: obtener la ruta de la música procesada desde project_info
+                processed_music_path = project_info.get("temp_background_music_path")
+
+                if not final_video_clip:
+                    raise ValueError("El clip de video final es None. No se puede guardar.")
                 
-                if has_audio:
-                    # Estrategia 1: Usar archivo de audio original directamente
-                    try:
-                        logger.info(f"[{project_id}] Intentando método directo con archivo de audio original...")
-                        
-                        # Usar el archivo de audio TTS original en lugar del clip en memoria
-                        original_audio_path = project_info.get('audio_path')
-                        if original_audio_path and Path(original_audio_path).exists():
-                            # Rutas temporales
-                            temp_video_path = base_path / "video" / f"{project_id}_temp_video.mp4"
-                            
-                            # Guardar video sin audio
-                            logger.info(f"[{project_id}] Guardando video sin audio...")
-                            final_video_clip.without_audio().write_videofile(
-                                str(temp_video_path),
-                                fps=24,
-                                codec='libx264',
-                                logger=None
-                            )
-                            
-                            # Usar audio original directamente (evitar problemas de clip corrupto)
-                            logger.info(f"[{project_id}] Usando archivo de audio original: {original_audio_path}")
-                            
-                            # Combinar con FFmpeg directamente
-                            logger.info(f"[{project_id}] Combinando video y audio con FFmpeg...")
-                            ffmpeg_cmd = [
-                                'ffmpeg', '-y',  # -y para sobrescribir
-                                '-i', str(temp_video_path),  # Input video
-                                '-i', str(original_audio_path),  # Input audio original
-                                '-c:v', 'copy',  # Copiar video sin recodificar
-                                '-c:a', 'aac',   # Codificar audio a AAC
-                                '-b:a', '192k',  # Bitrate de audio
-                                '-map', '0:v:0', '-map', '1:a:0',  # Mapear streams
-                                '-shortest',     # Usar la duración del stream más corto
-                                str(final_video_path)
-                            ]
-                            
-                            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-                            
-                            if result.returncode == 0:
-                                logger.info(f"[{project_id}] Video con audio combinado exitosamente con FFmpeg (método directo)")
-                                # Limpiar archivos temporales
-                                temp_video_path.unlink(missing_ok=True)
-                            else:
-                                logger.error(f"[{project_id}] Error en FFmpeg: {result.stderr}")
-                                raise RuntimeError(f"FFmpeg falló: {result.stderr}")
-                        else:
-                            raise RuntimeError("Archivo de audio original no encontrado")
-                            
-                    except Exception as e_direct:
-                        logger.error(f"[{project_id}] Error en método directo: {e_direct}")
-                        
-                        # Estrategia 2: Método de guardado separado (fallback)
-                        try:
-                            logger.info(f"[{project_id}] Intentando método de guardado separado...")
-                            
-                            # Rutas temporales
-                            temp_video_path = base_path / "video" / f"{project_id}_temp_video.mp4"
-                            temp_audio_path = base_path / "audio" / f"{project_id}_temp_audio.wav"
-                            
-                            # Guardar video sin audio
-                            logger.info(f"[{project_id}] Guardando video sin audio...")
-                            final_video_clip.without_audio().write_videofile(
-                                str(temp_video_path),
-                                fps=24,
-                                codec='libx264',
-                                logger=None
-                            )
-                            
-                            # Guardar audio por separado con manejo mejorado
-                            logger.info(f"[{project_id}] Guardando audio por separado...")
-                            try:
-                                final_video_clip.audio.write_audiofile(
-                                    str(temp_audio_path),
-                                    logger=None
-                                )
-                            except Exception as audio_write_error:
-                                logger.warning(f"[{project_id}] Error guardando audio como WAV, intentando MP3...")
-                                # Intentar con formato MP3 si WAV falla
-                                temp_audio_path_mp3 = base_path / "audio" / f"{project_id}_temp_audio.mp3"
-                                final_video_clip.audio.write_audiofile(
-                                    str(temp_audio_path_mp3),
-                                    logger=None
-                                )
-                                temp_audio_path = temp_audio_path_mp3
-                            
-                            # Combinar con FFmpeg directamente
-                            logger.info(f"[{project_id}] Combinando video y audio con FFmpeg...")
-                            ffmpeg_cmd = [
-                                'ffmpeg', '-y',  # -y para sobrescribir
-                                '-i', str(temp_video_path),  # Input video
-                                '-i', str(temp_audio_path),  # Input audio
-                                '-c:v', 'copy',  # Copiar video sin recodificar
-                                '-c:a', 'aac',   # Codificar audio a AAC
-                                '-b:a', '192k',  # Bitrate de audio
-                                '-map', '0:v:0', '-map', '1:a:0',  # Mapear streams
-                                '-shortest',     # Usar la duración del stream más corto
-                                str(final_video_path)
-                            ]
-                            
-                            result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-                            
-                            if result.returncode == 0:
-                                logger.info(f"[{project_id}] Video con audio combinado exitosamente con FFmpeg")
-                                # Limpiar archivos temporales
-                                temp_video_path.unlink(missing_ok=True)
-                                temp_audio_path.unlink(missing_ok=True)
-                            else:
-                                logger.error(f"[{project_id}] Error en FFmpeg: {result.stderr}")
-                                raise RuntimeError(f"FFmpeg falló: {result.stderr}")
-                                
-                        except Exception as e_separate:
-                            logger.error(f"[{project_id}] Error en método separado: {e_separate}")
-                            
-                            # Estrategia 3: Guardar sin audio como último recurso
-                            logger.info(f"[{project_id}] Guardando sin audio como último recurso...")
-                            final_video_clip.without_audio().write_videofile(
-                                str(final_video_path),
-                                fps=24,
-                                codec='libx264',
-                                logger=None
-                            )
-                            logger.warning(f"[{project_id}] Video guardado sin audio debido a errores persistentes")
+                # 2. Guardar el clip de video SIN NINGÚN AUDIO
+                logger.info(f"[{project_id}] Guardando componente de video sin audio en: {temp_video_path}")
+                final_video_clip.without_audio().write_videofile(
+                    str(temp_video_path),
+                    fps=24,
+                    codec='libx264',
+                    preset='medium',
+                    logger=None,  # Usar None para evitar barras de progreso en los logs
+                    threads=os.cpu_count() or 2
+                )
+                
+                # 3. Construir el comando FFmpeg para combinar todo
+                ffmpeg_cmd = ['ffmpeg', '-y']  # -y para sobrescribir el archivo de salida si existe
+                
+                # Input 0: Video
+                ffmpeg_cmd.extend(['-i', str(temp_video_path)])
+                
+                # Input 1: Audio TTS
+                if not tts_audio_path or not Path(tts_audio_path).exists():
+                    raise FileNotFoundError("El archivo de audio TTS no se encontró para la mezcla final.")
+                ffmpeg_cmd.extend(['-i', str(tts_audio_path)])
+
+                # Lógica de combinación de audio
+                if processed_music_path and Path(processed_music_path).exists():
+                    # --- CASO CON MÚSICA DE FONDO ---
+                    logger.info(f"[{project_id}] Combinando video, TTS y música de fondo con FFmpeg.")
+                    
+                    # Input 2: Música de fondo
+                    ffmpeg_cmd.extend(['-i', str(processed_music_path)])
+                    
+                    # Filtro para mezclar los dos audios: TTS (stream 1) y Música (stream 2)
+                    # 'amix' mezcla los audios. 'duration=first' hace que la mezcla dure lo que el primer audio (TTS).
+                    # 'dropout_transition=3' ayuda a suavizar el final si los audios no tienen la misma longitud.
+                    ffmpeg_cmd.extend(['-filter_complex', '[1:a][2:a]amix=inputs=2:duration=first:dropout_transition=3[aout]'])
+                    
+                    # Mapear los streams de salida
+                    ffmpeg_cmd.extend(['-map', '0:v:0'])    # Video del input 0
+                    ffmpeg_cmd.extend(['-map', '[aout]'])  # El audio mezclado que creamos
+                    
                 else:
-                    # Guardar sin audio directamente
-                    final_video_clip.write_videofile(
-                        str(final_video_path),
-                        fps=24,
-                        codec='libx264',
-                        logger=None
-                    )
-                    logger.info(f"[{project_id}] Video sin audio guardado exitosamente")
+                    # --- CASO SIN MÚSICA DE FONDO ---
+                    logger.info(f"[{project_id}] Combinando video y audio TTS con FFmpeg.")
+                    # Mapear los streams de salida
+                    ffmpeg_cmd.extend(['-map', '0:v:0'])  # Video del input 0
+                    ffmpeg_cmd.extend(['-map', '1:a:0'])  # Audio del input 1 (TTS)
+
+                # Configuración de códecs y de salida final
+                quality_settings = self.video_gen_config.get('quality', {})
+                audio_bitrate = quality_settings.get('audio_bitrate', '192k')
                 
+                ffmpeg_cmd.extend([
+                    '-c:v', 'copy',          # Copia el stream de video sin recodificar (muy rápido)
+                    '-c:a', 'aac',           # Codifica el audio a AAC (muy compatible)
+                    '-b:a', audio_bitrate,   # Bitrate del audio
+                    str(final_video_path)
+                ])
+
+                # 4. Ejecutar el comando FFmpeg
+                logger.info(f"[{project_id}] Ejecutando comando FFmpeg: {' '.join(ffmpeg_cmd)}")
+                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=True)
+                logger.info(f"[{project_id}] FFmpeg stdout: {result.stdout}")
+                if result.stderr:
+                    logger.info(f"[{project_id}] FFmpeg stderr: {result.stderr}")
+
+                logger.info(f"[{project_id}] Video final guardado exitosamente en: {final_video_path}")
+
+                # 5. Actualizar la información del proyecto
+                if project_info.get("subtitled_video_generated"): 
+                    project_info["subtitled_video_path"] = str(final_video_path)
+                else: 
+                    project_info["final_video_path"] = str(final_video_path)
+                project_info["status"] = "completado"
+                self._save_project_info(base_path, project_info)
+
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                logger.error(f"[{project_id}] Error crítico durante el guardado con FFmpeg: {e}", exc_info=True)
+                if isinstance(e, subprocess.CalledProcessError):
+                    logger.error(f"[{project_id}] Salida de error de FFmpeg: {e.stderr}")
+                project_info["status"] = "error_guardado"
+                project_info["error_message"] = str(e)
+                self._save_project_info(base_path, project_info)
+                return None  # Devolver None para indicar fallo
             except Exception as e_write:
-                logger.error(f"[{project_id}] Error crítico en write_videofile: {e_write}")
-                # Último recurso absoluto: guardar solo el video sin audio
-                logger.info(f"[{project_id}] Guardado de emergencia absoluto sin audio...")
-                try:
-                    final_video_clip.without_audio().write_videofile(
-                        str(final_video_path),
-                        fps=24,
-                        codec='libx264',
-                        logger=None
-                    )
-                    logger.warning(f"[{project_id}] Video guardado sin audio como medida de emergencia absoluta")
-                except Exception as e_emergency:
-                    logger.error(f"[{project_id}] Error crítico en guardado de emergencia: {e_emergency}")
-                    raise RuntimeError(f"No se pudo guardar el video de ninguna manera: {e_emergency}")
-            logger.info(f"[{project_id}] Video final guardado exitosamente en: {final_video_path}")
-            
-            if project_info.get("subtitled_video_generated"): 
-                project_info["subtitled_video_path"] = str(final_video_path)
-            else: 
-                project_info["final_video_path"] = str(final_video_path)
-            project_info["status"] = "completado"
-            self._save_project_info(base_path, project_info) 
+                logger.error(f"[{project_id}] Error inesperado durante el guardado: {e_write}", exc_info=True)
+                project_info["status"] = "error_guardado_inesperado"
+                project_info["error_message"] = str(e_write)
+                self._save_project_info(base_path, project_info)
+                return None
+            finally:
+                # 6. Limpieza de archivos temporales
+                if 'temp_video_path' in locals():
+                    temp_video_path.unlink(missing_ok=True)
+                if processed_music_path and Path(processed_music_path).exists():
+                    Path(processed_music_path).unlink(missing_ok=True)
+                logger.info(f"[{project_id}] Limpieza de archivos temporales finalizada.") 
             
             return final_video_path
 
@@ -802,9 +723,11 @@ class VideoProcessor:
 
     def _apply_audio(self, video_clip: VideoFileClip, project_info: Dict, audio_config_ui: Dict) -> VideoFileClip:
         """
-        Aplica el audio TTS al video clip.
-        Si hay algún error, devuelve el video clip original sin modificar.
+        Aplica el audio TTS y prepara la música de fondo para el guardado final.
+        Utiliza rutas absolutas para mayor robustez.
         """
+        from moviepy.editor import AudioFileClip, concatenate_audioclips
+        
         project_id = project_info.get('id', 'AUDIO')
         logger.info(f"[{project_id}] Iniciando _apply_audio...")
         
@@ -814,19 +737,80 @@ class VideoProcessor:
             return video_clip
 
         try:
-            # Cargar el audio TTS
+            # Cargar el audio TTS y aplicar volumen
             tts_audio_clip = AudioFileClip(tts_path)
             logger.info(f"[{project_id}] TTS cargado ({tts_audio_clip.duration:.2f}s)")
+            tts_volume = audio_config_ui.get('tts_volume', 1.0)
+            if tts_volume != 1.0:
+                tts_audio_clip = tts_audio_clip.volumex(tts_volume)
+                logger.info(f"[{project_id}] Volumen TTS ajustado a {tts_volume}")
 
-            # Aplicar el audio al video
+            # Aplicar solo el audio TTS al clip por ahora. La música se gestionará en el guardado.
             new_video_clip = video_clip.set_audio(tts_audio_clip)
-            logger.info(f"[{project_id}] Audio TTS configurado en el clip.")
             
+            # --- LÓGICA DE MÚSICA DE FONDO MEJORADA ---
+            relative_music_path = audio_config_ui.get('bg_music_selection')
+            
+            # Siempre inicializamos la ruta de música temporal a None
+            project_info["temp_background_music_path"] = None
+
+            if relative_music_path and relative_music_path != "**Ninguna**":
+                # Construir la ruta absoluta usando PROJECT_ROOT
+                absolute_music_path = PROJECT_ROOT / relative_music_path
+                logger.info(f"[{project_id}] Ruta de música relativa seleccionada: '{relative_music_path}'")
+                logger.info(f"[{project_id}] Intentando cargar desde ruta absoluta: '{absolute_music_path}'")
+
+                if not absolute_music_path.exists():
+                    logger.error(f"[{project_id}] ¡¡ERROR CRÍTICO!! El archivo de música NO EXISTE en la ruta absoluta: {absolute_music_path}")
+                    # El proceso continuará sin música, pero el error es claro.
+                else:
+                    try:
+                        logger.info(f"[{project_id}] Archivo de música encontrado. Procesando...")
+                        
+                        bg_music_clip = AudioFileClip(str(absolute_music_path))
+                        
+                        music_volume = audio_config_ui.get('music_volume', 0.1)
+                        bg_music_clip = bg_music_clip.volumex(music_volume)
+                        
+                        video_duration = video_clip.duration
+                        music_loop = audio_config_ui.get('music_loop', True)
+                        
+                        if music_loop and bg_music_clip.duration < video_duration:
+                            loops_needed = int(video_duration / bg_music_clip.duration) + 1
+                            looped_clips = [bg_music_clip] * loops_needed
+                            bg_music_clip = concatenate_audioclips(looped_clips).subclip(0, video_duration)
+                            logger.info(f"[{project_id}] Música en loop para {video_duration:.2f}s")
+                        elif bg_music_clip.duration > video_duration:
+                            bg_music_clip = bg_music_clip.subclip(0, video_duration)
+                            logger.info(f"[{project_id}] Música cortada a {video_duration:.2f}s")
+
+                        # Guardar música procesada para usarla después con FFmpeg
+                        temp_dir = PROJECT_ROOT / "temp"
+                        temp_dir.mkdir(exist_ok=True)
+                        temp_music_path = temp_dir / f"processed_music_{project_id}.mp3"
+                        
+                        bg_music_clip.write_audiofile(str(temp_music_path), logger=None, codec='mp3')
+                        
+                        if not temp_music_path.exists():
+                            raise RuntimeError(f"No se pudo crear archivo temporal de música: {temp_music_path}")
+
+                        logger.info(f"[{project_id}] Música procesada guardada en: {temp_music_path}")
+                        
+                        # Marcar que hay música de fondo para que el proceso de guardado lo sepa
+                        project_info["temp_background_music_path"] = str(temp_music_path)
+                        
+                        bg_music_clip.close()
+
+                    except Exception as music_error:
+                        logger.error(f"[{project_id}] Error procesando el archivo de música '{absolute_music_path}': {music_error}. Se continuará sin ella.", exc_info=True)
+            else:
+                logger.info(f"[{project_id}] No se ha seleccionado música de fondo o la ruta está vacía.")
+
             return new_video_clip
 
         except Exception as e:
-            logger.error(f"[{project_id}] Error en _apply_audio: {e}", exc_info=True)
-            return video_clip  # Devolver el original si hay error
+            logger.error(f"[{project_id}] Error crítico en _apply_audio: {e}", exc_info=True)
+            return video_clip
 
     def _apply_effects_overlays(self, video_clip: CompositeVideoClip, project_info: Dict, video_config_ui: Dict) -> CompositeVideoClip:
         project_id = project_info.get('id', 'EFFECTS')

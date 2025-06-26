@@ -55,7 +55,7 @@ def render_settings(app_config):
                 with open(".voidrules", "w") as f:
                     f.write(edited_config)
                 st.success("Configuración guardada exitosamente")
-                st.experimental_rerun()
+                st.rerun()
                 
         except Exception as e:
             st.error(f"No se pudo cargar el archivo: {e}")

@@ -298,7 +298,8 @@ class VideoServices:
         color: str = "white",
         stroke_color: str = "black",
         stroke_width: int = 2,
-        position: str = "bottom"
+        position: str = "bottom",
+        fade_out_duration: float = 0.0
     ) -> Optional[CompositeVideoClip]:
         """Incrusta subtítulos en el video usando MoviePy."""
         video = None
@@ -388,6 +389,18 @@ class VideoServices:
                         # Posición inferior con margen adecuado
                         bottom_y = video_height - bottom_margin - txt_clip.h
                         txt_clip = txt_clip.set_position(('center', bottom_y))
+
+                    # MEJORA: Aplicar fade out a subtítulos que aparecen al final del video
+                    if fade_out_duration > 0 and video_clip.duration:
+                        fade_start_time = video_clip.duration - fade_out_duration
+                        # Si el subtítulo termina después del inicio del fade out, aplicar fade out
+                        if end > fade_start_time:
+                            # Calcular cuánto del subtítulo necesita fade out
+                            subtitle_fade_start = max(0, fade_start_time - start)
+                            if subtitle_fade_start < duration:
+                                txt_clip = txt_clip.fadeout(duration - subtitle_fade_start)
+                                if i == len(segments) - 1:  # Solo log para el último subtítulo
+                                    logger.info(f"[Subtitles] Fade out aplicado al subtítulo final (duración: {duration - subtitle_fade_start:.2f}s)")
 
                     subtitle_clips.append(txt_clip)
                     processed_segments += 1

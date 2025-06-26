@@ -9,6 +9,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
 from pages.batch_page import render_batch
+from pages.video_generator import show_video_generator
 from pages.video_generator_page import render_video_generator
 from pages.prompts_manager_page import render_prompts_manager
 from pages.settings_page import render_settings
@@ -21,7 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 # --- Configuración de la Página ---
-st.set_page_config(page_title="Video Generator", page_icon="🎥", layout="wide")
+st.set_page_config(
+    page_title="Video Generator", 
+    page_icon="🎥", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # --- Inicialización de Session State ---
 if "batch_projects" not in st.session_state:
@@ -42,19 +48,28 @@ def main():
         return
 
     st.sidebar.title("Navegación")
-    page = st.sidebar.radio("Selecciona una página", ["Batch", "Generador de Videos", "Gestor de Prompts", "Configuración de APIs", "Historial"])
+    page = st.sidebar.radio("Selecciona una página", [
+        "🚀 Procesador por Lotes", 
+        "🎥 Generador Individual", 
+        "📝 Generador de Videos", 
+        "📋 Gestor de Prompts", 
+        "⚙️ Configuración de APIs", 
+        "📊 Historial"
+    ])
     
     # --- Navegación ---
     try:
-        if page == "Batch":
+        if page == "🚀 Procesador por Lotes":
             render_batch(app_config)
-        elif page == "Generador de Videos":
+        elif page == "🎥 Generador Individual":
+            show_video_generator()
+        elif page == "📝 Generador de Videos":
             render_video_generator(app_config)
-        elif page == "Gestor de Prompts":
+        elif page == "📋 Gestor de Prompts":
             render_prompts_manager(app_config)
-        elif page == "Configuración de APIs":
+        elif page == "⚙️ Configuración de APIs":
             render_settings(app_config)
-        elif page == "Historial":
+        elif page == "📊 Historial":
             st.warning("Historial aún no implementado")
     except Exception as e:
         st.error(f"Error en la aplicación: {e}")
