@@ -33,6 +33,7 @@ try:
     from utils.video_services import VideoServices
     from utils.subtitle_utils import split_subtitle_segments
     from utils.transcription_services import TranscriptionService
+    from utils.content_optimizer import ContentOptimizer
 except ImportError as e:
     logging.critical(f"FALLO CRÍTICO AL IMPORTAR SERVICIOS: {e}. La aplicación no puede continuar.", exc_info=True)
     raise RuntimeError(f"Error importando módulo necesario: {e}") from e
@@ -93,6 +94,8 @@ class VideoProcessor:
         logger.info(f"SceneGenerator inicializado (placeholder): {type(self.scene_generator)}") 
         self.video_service = VideoServices() 
         self.transcription_service = TranscriptionService()
+        # ContentOptimizer se inicializa con valores por defecto, se configurará dinámicamente
+        self.content_optimizer = ContentOptimizer(self.ai_service)
         logger.info("Servicios inicializados.")
 
     def _save_project_info(self, folder: Path, project_info: Dict):
@@ -687,6 +690,25 @@ class VideoProcessor:
                     Path(processed_music_path).unlink(missing_ok=True)
                 logger.info(f"[{project_id}] Limpieza de archivos temporales finalizada.") 
             
+            # --- GENERAR CONTENIDO OPTIMIZADO (OPCIONAL) ---
+            if full_config.get('generate_optimized_content', False):
+                logger.info(f"[{project_id}] Generando contenido optimizado para YouTube...")
+                try:
+                    optimized_content = self.content_optimizer.generate_optimized_content(project_info, full_config)
+                    if optimized_content:
+                        txt_path, json_path = self.content_optimizer.save_optimized_content(optimized_content, base_path)
+                        if txt_path and json_path:
+                            project_info["content_optimization_txt"] = str(txt_path)
+                            project_info["content_optimization_json"] = str(json_path)
+                            logger.info(f"[{project_id}] Contenido optimizado generado exitosamente")
+                        else:
+                            logger.warning(f"[{project_id}] Error guardando contenido optimizado")
+                    else:
+                        logger.warning(f"[{project_id}] No se pudo generar contenido optimizado")
+                except Exception as opt_error:
+                    logger.error(f"[{project_id}] Error generando contenido optimizado: {opt_error}")
+                    # Continuar sin contenido optimizado, no es crítico
+            
             return final_video_path
 
         except Exception as e:
@@ -769,7 +791,7 @@ class VideoProcessor:
                         
                         bg_music_clip = AudioFileClip(str(absolute_music_path))
                         
-                        music_volume = audio_config_ui.get('music_volume', 0.1)
+                        music_volume = audio_config_ui.get('music_volume', 0.06)
                         bg_music_clip = bg_music_clip.volumex(music_volume)
                         
                         video_duration = video_clip.duration

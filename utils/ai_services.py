@@ -43,6 +43,73 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or AI_CONFIG.get("openai_api_key")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL") or AI_CONFIG.get("ollama_base_url")
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_KEY") or AI_CONFIG.get("replicate_api_key")
 
+# --- Función para obtener información de proveedores disponibles ---
+def get_available_providers_info() -> Dict[str, Dict]:
+    """
+    Devuelve información sobre qué proveedores de IA están disponibles y configurados.
+    
+    Returns:
+        Dict con información de cada proveedor: {
+            'provider_name': {
+                'available': bool,
+                'configured': bool,
+                'models': List[str],
+                'status': str,
+                'key_configured': bool
+            }
+        }
+    """
+    providers_info = {}
+    
+    # OpenAI
+    openai_key = os.getenv("OPENAI_API_KEY") or AI_CONFIG.get("openai_api_key")
+    providers_info['openai'] = {
+        'available': True,
+        'configured': bool(openai_key),
+        'models': ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo-preview', 'gpt-4o', 'gpt-4o-mini'],
+        'status': 'Configurado' if openai_key else 'API Key no encontrada',
+        'key_configured': bool(openai_key)
+    }
+    
+    # Gemini
+    gemini_key = os.getenv("GEMINI_API_KEY") or AI_CONFIG.get("gemini_api_key")
+    providers_info['gemini'] = {
+        'available': True,
+        'configured': bool(gemini_key),
+        'models': ['gemini-pro', 'gemini-pro-vision', 'models/gemini-2.5-flash-lite-preview-06-17'],
+        'status': 'Configurado' if gemini_key else 'API Key no encontrada',
+        'key_configured': bool(gemini_key)
+    }
+    
+
+    
+    # Ollama
+    ollama_host = os.getenv("OLLAMA_BASE_URL") or AI_CONFIG.get("ollama_base_url")
+    ollama_available = False
+    ollama_models = []
+    
+    if ollama_host:
+        try:
+            client = ollama.Client(host=ollama_host)
+            models_response = client.list()
+            ollama_models = [model['name'] for model in models_response.get('models', [])]
+            ollama_available = True
+            ollama_status = f'Conectado ({len(ollama_models)} modelos)'
+        except Exception as e:
+            ollama_status = f'Error de conexión: {str(e)[:50]}...'
+    else:
+        ollama_status = 'URL no configurada'
+    
+    providers_info['ollama'] = {
+        'available': ollama_available,
+        'configured': bool(ollama_host),
+        'models': ollama_models or ['llama3.2', 'llama2', 'codellama'],  # Modelos ejemplo si no se puede conectar
+        'status': ollama_status,
+        'key_configured': bool(ollama_host)
+    }
+    
+    return providers_info
+
 # --- Clase AIServices --- 
 class AIServices:
     def __init__(self):

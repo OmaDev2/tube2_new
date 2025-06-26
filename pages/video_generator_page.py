@@ -257,7 +257,7 @@ def _render_video_audio_options_section(app_config):
         available_music = ["**Ninguna**"] + ([f.name for f in bg_music_folder.iterdir() if f.suffix.lower() in ['.mp3', '.wav']] if bg_music_folder.exists() else [])
         sel_music = st.selectbox("Música Fondo", available_music, key="vg_bg_music")
         audio_config['bg_music_selection'] = str(bg_music_folder / sel_music) if sel_music != "**Ninguna**" else None
-        audio_config['music_volume'] = st.slider("Volumen Música", 0.0, 1.0, 0.1, 0.01, "%.2f", key="vg_music_vol", disabled=(not audio_config['bg_music_selection']))
+        audio_config['music_volume'] = st.slider("Volumen Música", 0.0, 1.0, 0.06, 0.01, "%.2f", key="vg_music_vol", disabled=(not audio_config['bg_music_selection']))
         audio_config['music_loop'] = st.checkbox("Loop Música", True, key="vg_music_loop", disabled=(not audio_config['bg_music_selection']))
     with col_vid_m2:
         video_config['fade_in'] = st.slider("Fade In Video (s)", 0.0, 5.0, 1.0, 0.1, key="vg_fade_in")
@@ -311,6 +311,80 @@ def render_video_generator(app_config):
     video_config, audio_config = _render_video_audio_options_section(app_config)
     subtitles_config = _render_subtitles_options_section()
     
+    # --- OPTIMIZACIÓN DE CONTENIDO ---
+    st.subheader("6. Optimización para YouTube")
+    st.markdown("Genera automáticamente títulos, descripción, tags y capítulos optimizados para YouTube.")
+    
+    optimization_config = {}
+    optimization_config['generate_optimized_content'] = st.checkbox(
+        "🎯 Generar contenido optimizado (títulos, descripción, tags, capítulos)", 
+        value=False, 
+        key="vg_optimize_content",
+        help="Usa IA para generar títulos alternativos, descripción SEO, tags relevantes y capítulos con timestamps"
+    )
+    
+    if optimization_config['generate_optimized_content']:
+        st.info("💡 Se generarán archivos `content_optimization.txt` y `youtube_metadata.json` en la carpeta del proyecto")
+        
+        # Configuración del LLM para optimización
+        st.markdown("**Configuración del LLM para Optimización:**")
+        
+        # Obtener proveedores disponibles
+        from utils.ai_services import get_available_providers_info
+        providers_info = get_available_providers_info()
+        available_providers = [name for name, info in providers_info.items() if info['configured']]
+        
+        if available_providers:
+            col_opt1, col_opt2 = st.columns(2)
+            
+            with col_opt1:
+                provider_display_names = {
+                    'openai': 'OpenAI',
+                    'gemini': 'Google Gemini',
+                    'ollama': 'Ollama (Local)'
+                }
+                
+                # Priorizar Gemini si está disponible
+                default_provider_index = 0
+                if 'gemini' in available_providers:
+                    default_provider_index = available_providers.index('gemini')
+                
+                optimization_config['optimization_provider'] = st.selectbox(
+                    "Proveedor IA", 
+                    available_providers,
+                    index=default_provider_index,
+                    key="vg_opt_provider",
+                    format_func=lambda x: provider_display_names.get(x, x.title()),
+                    help="Proveedor de IA para generar el contenido optimizado (🔵 Gemini recomendado)"
+                )
+            
+            with col_opt2:
+                # Modelos según el proveedor seleccionado
+                selected_provider = optimization_config['optimization_provider']
+                if selected_provider in providers_info:
+                    available_models = providers_info[selected_provider]['models']
+                    
+                    # Configurar modelo por defecto según el proveedor
+                    default_model_index = 0
+                    if selected_provider == 'gemini' and 'models/gemini-2.5-flash-lite-preview-06-17' in available_models:
+                        default_model_index = available_models.index('models/gemini-2.5-flash-lite-preview-06-17')
+                    
+                    optimization_config['optimization_model'] = st.selectbox(
+                        "Modelo", 
+                        available_models, 
+                        index=default_model_index,
+                        key="vg_opt_model",
+                        help=f"Modelo específico de {provider_display_names.get(selected_provider, selected_provider)} a usar"
+                    )
+                else:
+                    st.error("Error: Proveedor no encontrado")
+                    optimization_config['optimization_model'] = 'gpt-3.5-turbo'  # Fallback
+        else:
+            st.warning("⚠️ **No hay proveedores de IA configurados**")
+            st.info("Ve a la página de **Configuración** para configurar al menos un proveedor (OpenAI, Gemini o Ollama)")
+            optimization_config['optimization_provider'] = 'openai'  # Fallback
+            optimization_config['optimization_model'] = 'gpt-3.5-turbo'  # Fallback
+    
     st.divider()
     
     # Recopilar toda la configuración
@@ -323,7 +397,8 @@ def render_video_generator(app_config):
         },
         "video": video_config,
         "audio": audio_config,
-        "subtitles": subtitles_config
+        "subtitles": subtitles_config,
+        **optimization_config
     }
 
     # Botón de Generación

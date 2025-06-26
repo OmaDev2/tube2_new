@@ -351,7 +351,7 @@ def show_batch_processor():
             'tts_pitch_hz': -5,
             'tts_volume': 1.0,
             'bg_music_selection': None,
-            'music_volume': 0.1,
+            'music_volume': 0.06,
             'music_loop': True
         }
     
@@ -373,8 +373,100 @@ def show_batch_processor():
             'max_words': 7
         }
     
+    # Sección 6: Optimización para YouTube (BATCH)
+    st.header("6. Optimización para YouTube")
+    st.markdown("Genera automáticamente contenido optimizado para todos los videos del batch.")
+    
+    optimization_config = {}
+    optimization_config['generate_optimized_content'] = st.checkbox(
+        "🎯 Generar contenido optimizado para TODOS los videos", 
+        value=False, 
+        key="batch_optimize_content",
+        help="Genera títulos alternativos, descripción SEO, tags relevantes y capítulos con timestamps para cada video"
+    )
+    
+    if optimization_config['generate_optimized_content']:
+        st.info("💡 Se generarán archivos `content_optimization.txt` y `youtube_metadata.json` en cada carpeta de proyecto")
+        
+        # Configuración del LLM para optimización
+        st.markdown("**Configuración del LLM para Optimización:**")
+        
+        # Obtener proveedores disponibles
+        from utils.ai_services import get_available_providers_info
+        providers_info = get_available_providers_info()
+        available_providers = [name for name, info in providers_info.items() if info['configured']]
+        
+        if available_providers:
+            col_llm1, col_llm2 = st.columns(2)
+            
+            with col_llm1:
+                provider_display_names = {
+                    'openai': 'OpenAI',
+                    'gemini': 'Google Gemini',
+                    'ollama': 'Ollama (Local)'
+                }
+                
+                # Priorizar Gemini si está disponible
+                default_provider_index = 0
+                if 'gemini' in available_providers:
+                    default_provider_index = available_providers.index('gemini')
+                
+                optimization_config['optimization_provider'] = st.selectbox(
+                    "Proveedor IA", 
+                    available_providers,
+                    index=default_provider_index,
+                    key="batch_opt_provider",
+                    format_func=lambda x: provider_display_names.get(x, x.title()),
+                    help="Proveedor de IA para generar el contenido optimizado (🔵 Gemini recomendado)"
+                )
+            
+            with col_llm2:
+                # Modelos según el proveedor seleccionado
+                selected_provider = optimization_config['optimization_provider']
+                if selected_provider in providers_info:
+                    available_models = providers_info[selected_provider]['models']
+                    
+                    # Configurar modelo por defecto según el proveedor
+                    default_model_index = 0
+                    if selected_provider == 'gemini' and 'models/gemini-2.5-flash-lite-preview-06-17' in available_models:
+                        default_model_index = available_models.index('models/gemini-2.5-flash-lite-preview-06-17')
+                    
+                    optimization_config['optimization_model'] = st.selectbox(
+                        "Modelo", 
+                        available_models, 
+                        index=default_model_index,
+                        key="batch_opt_model",
+                        help=f"Modelo específico de {provider_display_names.get(selected_provider, selected_provider)} a usar"
+                    )
+                else:
+                    st.error("Error: Proveedor no encontrado")
+                    optimization_config['optimization_model'] = 'gpt-3.5-turbo'  # Fallback
+        else:
+            st.warning("⚠️ **No hay proveedores de IA configurados**")
+            st.info("Ve a la página de **Configuración** para configurar al menos un proveedor (OpenAI, Gemini o Ollama)")
+            optimization_config['optimization_provider'] = 'openai'  # Fallback
+            optimization_config['optimization_model'] = 'gpt-3.5-turbo'  # Fallback
+        
+        # Opciones adicionales para batch
+        st.markdown("**Opciones de Batch:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            optimization_config['use_same_style'] = st.checkbox(
+                "Usar estilo consistente", 
+                value=True,
+                key="batch_opt_consistent",
+                help="Mantener un estilo similar en títulos y descripciones entre videos"
+            )
+        with col2:
+            optimization_config['generate_series_tags'] = st.checkbox(
+                "Tags de serie", 
+                value=True,
+                key="batch_opt_series",
+                help="Añadir tags que conecten todos los videos como una serie"
+            )
+    
     # Botón para procesar el batch
-    st.header("4. Procesar Batch")
+    st.header("7. Procesar Batch")
     
     # Mostrar resumen antes del procesamiento
     if st.session_state.get("batch_projects"):
@@ -436,7 +528,8 @@ def show_batch_processor():
             },
             "video": video_config,
             "audio": audio_config,
-            "subtitles": subtitles_config
+            "subtitles": subtitles_config,
+            **optimization_config
         }
         
         # Procesar cada proyecto
@@ -497,7 +590,11 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
             "scenes_config": batch_config["scenes_config"],
             "video": batch_config["video"],
             "audio": batch_config["audio"],
-            "subtitles": batch_config["subtitles"]
+            "subtitles": batch_config["subtitles"],
+            # Añadir configuración de optimización
+            "generate_optimized_content": batch_config.get("generate_optimized_content", False),
+            "use_same_style": batch_config.get("use_same_style", False),
+            "generate_series_tags": batch_config.get("generate_series_tags", False)
         }
         
         progress_callback(0.1, "Iniciando procesamiento con VideoProcessor...")
