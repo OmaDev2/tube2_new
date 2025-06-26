@@ -26,12 +26,11 @@ except ImportError as e:
 def show_batch_processor():
     st.title("🚀 Procesador por Lotes de Videos")
     
-    with st.expander("ℹ️ ¿Qué hace el procesador por lotes?", expanded=False):
-        st.markdown("""
-        **Automatiza completamente** la creación de videos desde título + contexto:
-        
-        📝 Guión → 🔊 Audio → 🎯 Transcripción → 🎬 Escenas → 🖼️ Imágenes → 🎥 Video → 📝 Subtítulos
-        """)
+    st.info("""
+    **Automatiza completamente** la creación de videos desde título + contexto:
+    
+    📝 Guión → 🔊 Audio → 🎯 Transcripción → 🎬 Escenas → 🖼️ Imágenes → 🎥 Video → 📝 Subtítulos
+    """)
     
     st.markdown("---")
     
@@ -41,7 +40,7 @@ def show_batch_processor():
     except:
         app_config = {"ai": {"default_models": {}}}
     
-    # Sección 1: Gestión de Proyectos
+    # Sección 1: Gestión de Proyectos por Lotes
     st.header("1. Gestión de Proyectos por Lotes")
     
     # Añadir nuevos proyectos
@@ -195,8 +194,132 @@ def show_batch_processor():
     else:
         st.info("📝 No hay proyectos en la cola. Añade algunos proyectos para comenzar.")
     
-    # Sección 2: Configuración de IA para Guiones
-    st.header("2. Configuración de IA para Guiones")
+    # Sección 2: Configuración del Video
+    st.header("2. Configuración del Video")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        duration_per_image = st.slider(
+            "Duración por imagen (segundos)",
+            min_value=1.0,
+            max_value=30.0,
+            value=10.0,
+            step=0.5,
+            key="batch_duration_per_image"
+        )
+    
+    with col2:
+        transition_duration = st.slider(
+            "Duración de la transición (segundos)",
+            min_value=0.0,
+            max_value=2.0,
+            value=1.0,
+            step=0.1,
+            key="batch_transition_duration"
+        )
+    
+    with col3:
+        from utils.transitions import TransitionEffect
+        transition_type = st.selectbox(
+            "Tipo de transición",
+            options=TransitionEffect.get_available_transitions(),
+            format_func=lambda x: "Sin transición" if x == "none" else "Disolución" if x == "dissolve" else x,
+            index=1,  # 'dissolve' está en la posición 1 de la lista
+            key="batch_transition_type"
+        )
+    
+    # Controles de fade in/out
+    st.subheader("Efectos de entrada y salida")
+    col1, col2 = st.columns(2)
+    with col1:
+        fade_in_duration = st.slider(
+            "Fade In (segundos)",
+            min_value=0.0,
+            max_value=2.0,
+            value=1.0,
+            step=0.1,
+            key="batch_fade_in"
+        )
+    with col2:
+        fade_out_duration = st.slider(
+            "Fade Out (segundos)",
+            min_value=0.0,
+            max_value=2.0,
+            value=1.0,
+            step=0.1,
+            key="batch_fade_out"
+        )
+    
+    # Sección 3: Efectos
+    st.header("3. Efectos")
+    try:
+        effects_sequence = show_effects_ui(key_prefix="batch_")
+    except:
+        st.warning("⚠️ La interfaz de efectos no está disponible. Se usará configuración básica.")
+        effects_sequence = []
+        
+        # Configuración manual de efectos como fallback
+        col1, col2 = st.columns(2)
+        with col1:
+            enable_zoom = st.checkbox("Activar zoom", key="batch_enable_zoom")
+            if enable_zoom:
+                zoom_factor = st.slider("Factor de zoom", 1.0, 2.0, 1.2, key="batch_zoom_factor")
+        with col2:
+            enable_pan = st.checkbox("Activar paneo", key="batch_enable_pan")
+            if enable_pan:
+                pan_direction = st.selectbox("Dirección", ["left", "right", "up", "down"], key="batch_pan_direction")
+    
+    # Sección 4: Overlays
+    st.header("4. Overlays")
+    try:
+        overlay_sequence = show_overlays_ui(key_prefix="batch_")
+    except:
+        st.warning("⚠️ La interfaz de overlays no está disponible. Se usará configuración básica.")
+        overlay_sequence = []
+        
+        # Configuración manual de overlays como fallback
+        enable_overlay = st.checkbox("Activar overlay", key="batch_enable_overlay")
+        if enable_overlay:
+            overlay_opacity = st.slider("Opacidad del overlay", 0.0, 1.0, 0.3, key="batch_overlay_opacity")
+    
+    # Configuración avanzada de efectos y overlays para batch
+    st.subheader("Configuración Avanzada para Batch")
+    col1, col2 = st.columns(2)
+    with col1:
+        randomize_effects = st.checkbox(
+            "🎲 Randomizar efectos entre proyectos",
+            help="Cada proyecto tendrá efectos ligeramente diferentes",
+            key="batch_randomize_effects"
+        )
+        if randomize_effects:
+            effect_variation = st.slider(
+                "Variación de efectos",
+                min_value=0.1,
+                max_value=0.5,
+                value=0.2,
+                step=0.1,
+                key="batch_effect_variation"
+            )
+    
+    with col2:
+        vary_intensity = st.checkbox(
+            "📊 Variar intensidad por proyecto",
+            help="La intensidad de efectos aumentará gradualmente",
+            key="batch_vary_intensity"
+        )
+        if vary_intensity:
+            intensity_range = st.slider(
+                "Rango de intensidad",
+                min_value=0.5,
+                max_value=2.0,
+                value=(0.8, 1.5),
+                key="batch_intensity_range"
+            )
+    
+    # Sección 5: Configuración de IA y Voz
+    st.header("5. Configuración de IA y Voz")
+    
+    col1, col2 = st.columns(2)
     
     # Verificar si hay proyectos que necesitan IA
     proyectos_con_ia = [p for p in st.session_state.get("batch_projects", []) 
@@ -205,7 +328,6 @@ def show_batch_processor():
     if proyectos_con_ia:
         st.info(f"📊 {len(proyectos_con_ia)} proyecto(s) usarán IA para generar guión")
         
-        col1, col2 = st.columns(2)
         with col1:
             script_provider = st.selectbox(
                 "Proveedor de IA para Guiones",
@@ -240,8 +362,8 @@ def show_batch_processor():
         script_prompt_obj = None
         st.info("ℹ️ Todos los proyectos usan guión manual - La configuración de IA no se usará")
     
-    # Sección 3: Configuración de Escenas y Imágenes
-    st.header("3. Configuración de Escenas y Imágenes")
+    # Sección 6: Configuración de Escenas y Imágenes
+    st.header("6. Configuración de Escenas y Imágenes")
     
     # Configuración del método de segmentación
     st.write("**Método de Segmentación de Escenas:**")
@@ -328,7 +450,7 @@ def show_batch_processor():
         st.warning(f"No se pudieron cargar los prompts de imágenes: {e}")
         img_prompt_obj = None
     
-    # Sección 4: Configuración de Video y Audio (REUTILIZANDO función del generador individual)
+    # Sección 7: Configuración de Video y Audio (REUTILIZANDO función del generador individual)
     try:
         # Usar las mismas funciones del generador individual (ya incluye su propio header)
         video_config, audio_config = _render_video_audio_options_section(app_config)
@@ -355,7 +477,7 @@ def show_batch_processor():
             'music_loop': True
         }
     
-    # Sección 5: Subtítulos (REUTILIZANDO función del generador individual)
+    # Sección 8: Subtítulos (REUTILIZANDO función del generador individual)
     try:
         # Usar la misma función del generador individual (ya incluye su propio header)
         subtitles_config = _render_subtitles_options_section()
@@ -373,8 +495,8 @@ def show_batch_processor():
             'max_words': 7
         }
     
-    # Sección 6: Optimización para YouTube (BATCH)
-    st.header("6. Optimización para YouTube")
+    # Sección 9: Optimización para YouTube (BATCH)
+    st.header("9. Optimización para YouTube")
     st.markdown("Genera automáticamente contenido optimizado para todos los videos del batch.")
     
     optimization_config = {}
@@ -466,7 +588,7 @@ def show_batch_processor():
             )
     
     # Botón para procesar el batch
-    st.header("7. Procesar Batch")
+    st.header("10. Procesar Batch")
     
     # Mostrar resumen antes del procesamiento
     if st.session_state.get("batch_projects"):
