@@ -450,10 +450,55 @@ def show_batch_processor():
         st.warning(f"No se pudieron cargar los prompts de imágenes: {e}")
         img_prompt_obj = None
     
-    # Sección 7: Configuración de Video y Audio (REUTILIZANDO función del generador individual)
+    # Sección 7: Configuración de Video y Audio (USANDO configuración del batch)
     try:
-        # Usar las mismas funciones del generador individual (ya incluye su propio header)
-        video_config, audio_config = _render_video_audio_options_section(app_config)
+        # Usar la configuración de audio del generador individual pero video del batch
+        _, audio_config = _render_video_audio_options_section(app_config)
+        
+        # Configurar video con los efectos y overlays del batch
+        st.header("7. Configuración de Video")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            use_auto_duration = st.checkbox(
+                "Duración automática basada en audio",
+                value=True,
+                help="Calcular duración por imagen según el audio transcrito",
+                key="batch_use_auto_duration"
+            )
+        with col2:
+            if not use_auto_duration:
+                duration_per_image_manual = st.slider(
+                    "Duración manual por imagen (s)",
+                    min_value=1.0,
+                    max_value=15.0,
+                    value=10.0,
+                    step=0.5,
+                    key="batch_duration_manual"
+                )
+            else:
+                duration_per_image_manual = 10.0
+        
+        # Usar las configuraciones ya definidas en las secciones 3 y 4 del batch
+        video_config = {
+            'use_auto_duration': use_auto_duration,
+            'duration_per_image_manual': duration_per_image_manual,
+            'transition_type': transition_type,
+            'transition_duration': 1.0,
+            'fade_in': fade_in_duration,
+            'fade_out': fade_out_duration,
+            'effects': effects_sequence,  # De la sección 3
+            'overlays': overlay_sequence  # De la sección 4
+        }
+        
+        # Debug: Mostrar configuración de overlays
+        if overlay_sequence:
+            st.info(f"🖼️ Configuración de overlays detectada: {len(overlay_sequence)} overlay(s)")
+            for i, overlay in enumerate(overlay_sequence):
+                st.caption(f"  • Overlay {i+1}: {overlay}")
+        else:
+            st.warning("⚠️ No se detectaron overlays configurados")
+        
     except Exception as e:
         st.error(f"Error cargando configuración de video/audio: {e}")
         # Fallback básico
@@ -464,8 +509,8 @@ def show_batch_processor():
             'transition_duration': 1.0,
             'fade_in': 1.0,
             'fade_out': 1.0,
-            'effects': [],
-            'overlays': []
+            'effects': effects_sequence if 'effects_sequence' in locals() else [],
+            'overlays': overlay_sequence if 'overlay_sequence' in locals() else []
         }
         audio_config = {
             'tts_voice': 'es-ES-AlvaroNeural',

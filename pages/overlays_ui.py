@@ -2,9 +2,12 @@ import streamlit as st
 from utils.overlays import OverlayManager
 from typing import List, Tuple, Optional
 
-def show_overlays_ui() -> List[Tuple[str, float, float, Optional[float]]]:
+def show_overlays_ui(key_prefix: str = "") -> List[Tuple[str, float, float, Optional[float]]]:
     """
     Muestra la interfaz de usuario para seleccionar overlays.
+    
+    Args:
+        key_prefix: Prefijo para las keys de Streamlit (para evitar conflictos en batch)
     
     Returns:
         Lista de tuplas (nombre_overlay, opacidad, tiempo_inicio, duración)
@@ -26,7 +29,8 @@ def show_overlays_ui() -> List[Tuple[str, float, float, Optional[float]]]:
         "Selecciona los overlays para aplicar secuencialmente",
         options=available_overlays,
         default=[],
-        help="Los overlays se aplicarán en orden rotativo a cada clip: Clip 1 → Overlay 1, Clip 2 → Overlay 2, etc."
+        help="Los overlays se aplicarán en orden rotativo a cada clip: Clip 1 → Overlay 1, Clip 2 → Overlay 2, etc.",
+        key=f"{key_prefix}overlay_selection"
     )
     
     if selected_overlays:
@@ -39,7 +43,8 @@ def show_overlays_ui() -> List[Tuple[str, float, float, Optional[float]]]:
         max_value=1.0,
         value=0.25,
         step=0.05,
-        help="Controla la transparencia de todos los overlays"
+        help="Controla la transparencia de todos los overlays",
+        key=f"{key_prefix}overlay_opacity"
     )
     
     # Crear secuencia con la misma opacidad para todos los overlays

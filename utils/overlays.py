@@ -1,140 +1,140 @@
-from moviepy.editor import VideoFileClip, CompositeVideoClip
-from moviepy.video.fx import all as vfx
-from typing import List, Tuple, Optional
-import os
-from PIL import Image
-import cv2
-import numpy as np
+# utils/overlays.py
 
+from moviepy.editor import VideoFileClip, CompositeVideoClip
+from typing import List, Tuple, Optional, Dict
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+class OverlayManager:
+    """
+    Gestiona la carga, aplicación y limpieza de overlays de video de forma eficiente.
+    Combina un cache inteligente con lógica de bucle para evitar errores.
+    """
+    def __init__(self):
+        self.overlays_dir = "overlays"
+        if not os.path.exists(self.overlays_dir):
+            try:
+                os.makedirs(self.overlays_dir)
+                logger.info(f"Directorio de overlays creado en: {self.overlays_dir}")
+            except OSError as e:
+                logger.error(f"No se pudo crear el directorio de overlays: {e}")
+        
+        self._overlay_cache: Dict[str, VideoFileClip] = {}
+        logger.info("OverlayManager inicializado.")
+
+    def get_available_overlays(self) -> List[str]:
+        """Obtiene la lista de overlays disponibles en el directorio."""
+        try:
+            return [f for f in os.listdir(self.overlays_dir) 
+                   if f.endswith(('.mp4', '.mov', '.avi', '.webm'))]
+        except FileNotFoundError:
+            return []
+
+    def _load_overlay(self, overlay_name: str) -> Optional[VideoFileClip]:
+        """Carga un overlay desde el archivo o lo recupera del caché."""
+        if overlay_name in self._overlay_cache:
+            logger.debug(f"Overlay '{overlay_name}' encontrado en caché.")
+            return self._overlay_cache[overlay_name]
+
+        overlay_path = os.path.join(self.overlays_dir, overlay_name)
+        if not os.path.exists(overlay_path):
+            logger.error(f"El archivo de overlay '{overlay_name}' NO se encontró en: {overlay_path}")
+            return None
+
+        try:
+            overlay_clip = VideoFileClip(overlay_path, has_mask=True)
+            self._overlay_cache[overlay_name] = overlay_clip
+            logger.info(f"Overlay '{overlay_name}' cargado y cacheado.")
+            return overlay_clip
+        except Exception as e:
+            logger.error(f"Error al cargar el overlay '{overlay_name}': {e}", exc_info=True)
+            return None
+
+    def apply_overlays(self, base_clip: VideoFileClip, 
+                      overlays: List[Tuple[str, float, float, float]]) -> VideoFileClip:
+        """
+        Aplica una lista de overlays a un clip base, gestionando bucles y duraciones.
+        
+        Args:
+            base_clip: Clip de video base.
+            overlays: Lista de tuplas (overlay_name, opacity, start_time, duration).
+        """
+        if not overlays:
+            return base_clip
+        
+        clips_to_compose = [base_clip]
+        
+        for overlay_name, opacity, start_time, target_duration in overlays:
+            
+            overlay_original = self._load_overlay(overlay_name)
+            if not overlay_original:
+                continue # Si no se pudo cargar, pasar al siguiente
+
+            try:
+                # --- LÓGICA DE BUCLE (LOOP) INTEGRADA ---
+                overlay_processed = overlay_original
+                native_duration = overlay_original.duration
+
+                if native_duration < target_duration:
+                    logger.info(f"Overlay '{overlay_name}' (Dur: {native_duration:.2f}s) es más corto que el objetivo ({target_duration:.2f}s). Aplicando bucle manual.")
+                    # Usar bucle manual más seguro
+                    loops_needed = int(target_duration / native_duration) + 1
+                    overlay_clips = []
+                    current_time = 0
+                    for i in range(loops_needed):
+                        if current_time >= target_duration:
+                            break
+                        clip_segment = overlay_original
+                        remaining_time = target_duration - current_time
+                        if remaining_time < native_duration:
+                            clip_segment = overlay_original.subclip(0, remaining_time)
+                        overlay_clips.append(clip_segment)
+                        current_time += clip_segment.duration
+                    
+                    from moviepy.editor import concatenate_videoclips
+                    overlay_processed = concatenate_videoclips(overlay_clips)
+                    
+                elif native_duration > target_duration:
+                    logger.info(f"Overlay '{overlay_name}' es más largo. Recortando a {target_duration:.2f}s.")
+                    overlay_processed = overlay_original.subclip(0, target_duration)
+                else:
+                    # La duración es la misma, no se hace nada
+                    overlay_processed = overlay_original.set_duration(target_duration)
+
+                # Aplicar resto de transformaciones
+                final_overlay = (overlay_processed
+                               .set_opacity(opacity)
+                               .set_start(start_time)
+                               .resize(height=base_clip.h)
+                               .set_position("center"))
+                
+                clips_to_compose.append(final_overlay)
+
+            except Exception as e:
+                logger.error(f"Error procesando la composición del overlay '{overlay_name}': {e}", exc_info=True)
+                continue
+        
+        if len(clips_to_compose) > 1:
+            logger.info(f"Componiendo {len(clips_to_compose) - 1} overlay(s) sobre el clip base.")
+            return CompositeVideoClip(clips_to_compose, use_bgclip=True)
+        else:
+            logger.warning("No se aplicó ningún overlay válido.")
+            return base_clip
+
+    def close(self):
+        """Libera la memoria de todos los clips de overlay cacheados."""
+        logger.info(f"Cerrando {len(self._overlay_cache)} overlays cacheados para liberar memoria.")
+        for clip in self._overlay_cache.values():
+            try:
+                clip.close()
+            except Exception as e:
+                logger.warning(f"Error cerrando un clip de overlay cacheado: {e}")
+        self._overlay_cache.clear()
+
+# Para compatibilidad con código anterior si fuera necesario.
 class VideoOverlay:
     def __init__(self, name: str, path: str):
         self.name = name
         self.path = path
-        self.clip = None
-    
-    def load(self):
-        if not self.clip:
-            self.clip = VideoFileClip(self.path)
-        return self.clip
-    
-    def apply(self, base_clip, opacity: float = 1.0, start_time: float = 0, duration: Optional[float] = None):
-        overlay = self.load()
-        if duration:
-            overlay = overlay.subclip(0, duration)
-        
-        # Función para redimensionar usando cv2
-        def resize_frame(frame):
-            return cv2.resize(frame, (base_clip.w, base_clip.h), interpolation=cv2.INTER_LINEAR)
-        
-        # Aplicar redimensionamiento
-        overlay = overlay.fl_image(resize_frame)
-        
-        # Aplicar opacidad
-        if opacity < 1.0:
-            overlay = overlay.set_opacity(opacity)
-        
-        # Posicionar en el tiempo
-        overlay = overlay.set_start(start_time)
-        
-        return CompositeVideoClip([base_clip, overlay])
-
-class OverlayManager:
-    def __init__(self):
-        self.overlays_dir = "overlays"
-        if not os.path.exists(self.overlays_dir):
-            os.makedirs(self.overlays_dir)
-    
-    def get_available_overlays(self) -> List[str]:
-        """Obtiene la lista de overlays disponibles."""
-        if not os.path.exists(self.overlays_dir):
-            return []
-        return [f for f in os.listdir(self.overlays_dir) 
-                if f.endswith(('.mp4', '.mov', '.avi', '.webm'))]
-    
-    def has_alpha_channel(self, video_path: str) -> bool:
-        """Detecta si un video tiene canal alpha."""
-        try:
-            # Intentar leer el video con OpenCV
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                return False
-                
-            # Leer varios frames para asegurarnos
-            for _ in range(5):  # Intentar con los primeros 5 frames
-                ret, frame = cap.read()
-                if not ret:
-                    continue
-                    
-                # Verificar si el frame tiene 4 canales (RGBA)
-                if len(frame.shape) == 3 and frame.shape[2] == 4:
-                    cap.release()
-                    return True
-                    
-            cap.release()
-            return False
-        except Exception as e:
-            print(f"Error al detectar canal alpha: {e}")
-            return False
-    
-    def optimize_overlay(self, overlay_clip: VideoFileClip, has_alpha: bool) -> VideoFileClip:
-        """Simplificado: solo devuelve el overlay tal cual, sin canal alpha ni máscara."""
-        return overlay_clip
-    
-    def apply_overlays(
-        self,
-        base_clip: VideoFileClip,
-        overlays: List[Tuple[str, float, float, float]]
-    ) -> VideoFileClip:
-        print(f"[DEBUG] Entrando en apply_overlays con overlays: {overlays}")
-        if not overlays:
-            print("[DEBUG] No hay overlays para aplicar.")
-            return base_clip
-        
-        overlay_clips = []
-        
-        for overlay_name, opacity, start_time, duration in overlays:
-            overlay_path = os.path.join(self.overlays_dir, overlay_name)
-            print(f"[DEBUG] Procesando overlay: {overlay_name} en {overlay_path}")
-            if not os.path.exists(overlay_path):
-                print(f"[DEBUG] Overlay no encontrado: {overlay_path}")
-                continue
-            
-            try:
-                # Cargar el overlay
-                overlay_clip = VideoFileClip(overlay_path)
-                print(f"[DEBUG] Overlay {overlay_name} cargado correctamente.")
-                
-                # Redimensionar overlay al tamaño del clip base
-                def resize_frame(frame):
-                    return cv2.resize(frame, (base_clip.w, base_clip.h), interpolation=cv2.INTER_LINEAR)
-                overlay_clip = overlay_clip.fl_image(resize_frame)
-                
-                # Detectar si tiene canal alpha
-                has_alpha = self.has_alpha_channel(overlay_path)
-                print(f"[DEBUG] Overlay {overlay_name} - Tiene alpha: {has_alpha}")
-                
-                # Optimizar el overlay según su tipo
-                overlay_clip = self.optimize_overlay(overlay_clip, has_alpha)
-                
-                # Ajustar la duración y el tiempo de inicio
-                overlay_clip = overlay_clip.set_start(start_time).set_duration(duration)
-                
-                # Aplicar la opacidad
-                if opacity < 1.0:
-                    overlay_clip = overlay_clip.set_opacity(opacity)
-                
-                overlay_clips.append(overlay_clip)
-                print(f"[DEBUG] Overlay {overlay_name} añadido a overlay_clips.")
-                
-            except Exception as e:
-                print(f"[DEBUG] Error al procesar overlay {overlay_name}: {e}")
-                continue
-        
-        if not overlay_clips:
-            print("[DEBUG] Ningún overlay fue añadido. Devolviendo base_clip.")
-            return base_clip
-        
-        # Combinar todos los overlays con el clip base
-        final_clip = CompositeVideoClip([base_clip] + overlay_clips)
-        print("[DEBUG] Overlays aplicados correctamente.")
-        return final_clip 

@@ -7,6 +7,7 @@ import math
 import os
 import yaml
 import datetime # Added for save_scenes
+import re
 
 # Importar AIServices desde el módulo correcto
 try:
@@ -20,6 +21,10 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# --- NUEVA CONSTANTE ---
+# Si una escena dura más que esto (en segundos), se subdividirá para mantener el dinamismo.
+MAX_SCENE_DURATION = 15.0
 
 class SceneGenerator:
     def __init__(self, config: Optional[Dict] = None):
@@ -161,64 +166,200 @@ class SceneGenerator:
         logger.info(f"Transcripción segmentada en {len(timed_scenes)} escenas basadas en duración objetivo de {target_duration:.2f}s.")
         return timed_scenes
 
-    def _generate_prompts_for_scenes(self, scenes: List[Dict], project_info: Dict, image_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
-        prompt_obj = image_prompt_config.get('prompt_obj')
-        if not prompt_obj:
-            logger.warning("No se proporcionó prompt_obj para imágenes. No se generarán prompts.")
-            for scene in scenes:
-                scene['image_prompt'] = '[ERROR] No image prompt template configured.'
-            return scenes
-        
-        system_prompt = prompt_obj.get("system_prompt", "")
-        user_prompt_template = prompt_obj.get("user_prompt", "Generate an image for the following scene: {scene_text}")
+    def _segment_script_by_paragraphs(self, script_text: str) -> List[str]:
+        """Divide el guión en párrafos usando saltos de línea dobles."""
+        paragraphs = re.split(r'\n\s*\n', script_text)
+        return [p.strip() for p in paragraphs if p.strip()]
 
-        total_scenes = len(scenes)
-        for i, scene in enumerate(scenes):
-            texto_escena = scene.get('text', '')
-            if not texto_escena:
-                scene['image_prompt'] = '[INFO] Scene is empty, skipping prompt generation.'
+    def _align_paragraphs_to_transcription(self, paragraphs: List[str], transcription_segments: List[Dict]) -> List[Dict]:
+        """Alinea los párrafos del guión con los timestamps de la transcripción."""
+        scenes = []
+        full_transcript_text = " ".join([seg['text'].strip() for seg in transcription_segments])
+        last_found_pos = 0
+
+        for i, paragraph in enumerate(paragraphs):
+            # Buscar el inicio del párrafo en la transcripción
+            # Usamos las primeras ~10 palabras para una búsqueda más fiable
+            search_text = " ".join(paragraph.split()[:10])
+            start_char_pos = full_transcript_text.find(search_text, last_found_pos)
+
+            if start_char_pos == -1:
+                logger.warning(f"No se pudo alinear el párrafo {i + 1}. Omitiendo.")
                 continue
 
-            logger.debug(f"Generando prompt para escena {scene.get('index', i)+1}/{total_scenes}...")
-            template_vars = {
-                "scene_text": texto_escena,
-                "titulo": project_info.get("titulo", ""),
-                "contexto": project_info.get("contexto", ""),
-                "scene_duration": scene.get("duration", 0) 
-            }
-            try:
-                user_prompt = user_prompt_template.format(**template_vars)
-            except KeyError as e:
-                 logger.error(f"Variable {e} is missing in the image prompt template. Usando texto de escena como fallback prompt.")
-                 user_prompt = texto_escena
+            end_char_pos = start_char_pos + len(paragraph)
+            last_found_pos = end_char_pos # Actualizar para la siguiente búsqueda
 
-            try:
-                # Safely get provider, defaulting to 'openai' if None or missing, then lowercasing
-                provider_value = image_prompt_config.get('img_prompt_provider')
-                if not isinstance(provider_value, str) or not provider_value.strip(): # Check if None, not a string, or empty
-                    provider_value = 'openai' # Default provider
-                
-                # Safely get model, defaulting if None or missing
-                model_value = image_prompt_config.get('img_prompt_model')
-                if not isinstance(model_value, str) or not model_value.strip():
-                    model_value = 'gpt-3.5-turbo' # Default model
+            # Encontrar los tiempos de inicio y fin para este rango de caracteres
+            scene_start_time, scene_end_time = -1, -1
+            current_char_count = 0
+            for seg in transcription_segments:
+                seg_len = len(seg['text'].strip()) + 1
+                if current_char_count >= start_char_pos and scene_start_time == -1:
+                    scene_start_time = seg['start']
+                if current_char_count >= end_char_pos and scene_start_time != -1:
+                    scene_end_time = seg['end']
+                    break
+                current_char_count += seg_len
+            
+            # Si el bucle termina, el tiempo final es el del último segmento
+            if scene_end_time == -1 and scene_start_time != -1:
+                scene_end_time = transcription_segments[-1]['end']
 
-                image_prompt_text = ai_service.generate_content(
-                    provider=provider_value.lower(),
-                    model=model_value, # Model name usually doesn't need .lower() unless your AI service expects it
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt
-                )
-                if not image_prompt_text or "[ERROR]" in image_prompt_text:
-                    logger.error(f"AI service failed to generate prompt for scene {scene.get('index', i)+1}: {image_prompt_text}")
-                    image_prompt_text = f"[ERROR] AI prompt generation failed. Fallback: Visuals for '{texto_escena[:100]}...'"
-                scene['image_prompt'] = image_prompt_text.strip()
-            except Exception as e:
-                 logger.error(f"Exception during AI prompt generation for scene {scene.get('index', i)+1}: {e}", exc_info=True)
-                 scene['image_prompt'] = f"[ERROR] Exception during prompt generation. Fallback: Visuals for '{texto_escena[:100]}...'"
-        logger.info(f"Image prompts generated for {len(scenes)} scenes.")
+            if scene_start_time != -1 and scene_end_time > scene_start_time:
+                scenes.append({
+                    "index": len(scenes),
+                    "text": paragraph,
+                    "start": scene_start_time,
+                    "end": scene_end_time,
+                    "duration": scene_end_time - scene_start_time
+                })
+        return scenes
+    
+    def generate_scenes_from_script(self, script_content: str, transcription_segments: List[Dict], mode: str) -> List[Dict]:
+        """Genera escenas con el nuevo modo híbrido por párrafos."""
+        logger.info(f"Generando escenas con modo: '{mode}'...")
+        
+        if mode == "Por Párrafos (Híbrido)":
+            # --- LÓGICA POR PÁRRAFOS (HÍBRIDA) ---
+            paragraphs = self._segment_script_by_paragraphs(script_content)
+            timed_scenes = self._align_paragraphs_to_transcription(paragraphs, transcription_segments)
+            
+            final_scenes = []
+            for scene in timed_scenes:
+                if scene['duration'] > MAX_SCENE_DURATION:
+                    logger.info(f"Escena {scene['index']} es muy larga ({scene['duration']:.1f}s > {MAX_SCENE_DURATION}s). Subdividiendo.")
+                    num_sub_scenes = round(scene['duration'] / (MAX_SCENE_DURATION - 5)) # Apuntar a escenas de ~20s
+                    if num_sub_scenes < 2: num_sub_scenes = 2
+                    
+                    sub_scene_duration = scene['duration'] / num_sub_scenes
+                    
+                    for j in range(num_sub_scenes):
+                        sub_start_time = scene['start'] + (j * sub_scene_duration)
+                        sub_end_time = sub_start_time + sub_scene_duration
+                        
+                        sub_text_parts = []
+                        for seg in transcription_segments:
+                            if seg['start'] >= sub_start_time and seg['end'] <= sub_end_time:
+                                sub_text_parts.append(seg['text'].strip())
+                        
+                        if not sub_text_parts: continue
+                        
+                        final_scenes.append({
+                            "index": len(final_scenes),
+                            "text": " ".join(sub_text_parts),
+                            "start": sub_start_time,
+                            "end": sub_end_time,
+                            "duration": sub_end_time - sub_start_time
+                        })
+                else:
+                    final_scenes.append(scene)
+            
+            logger.info(f"Segmentación por párrafos resultó en {len(final_scenes)} escenas finales.")
+            return final_scenes
+        
+        else:
+            # Fallback a métodos anteriores
+            return self._generate_scenes_legacy(script_content, transcription_segments, mode)
+
+    def _generate_scenes_legacy(self, script_content: str, transcription_segments: List[Dict], mode: str) -> List[Dict]:
+        """Métodos de segmentación anteriores para compatibilidad."""
+        if mode == "Por Duración (Basado en Audio)":
+            # Lógica original por duración
+            scenes = []
+            for i, seg in enumerate(transcription_segments):
+                scenes.append({
+                    "index": i,
+                    "text": seg['text'],
+                    "start": seg['start'],
+                    "end": seg['end'],
+                    "duration": seg['end'] - seg['start']
+                })
+            return scenes
+        else:
+            # Automático (Texto) - dividir por párrafos simples
+            paragraphs = script_content.split('\n\n')
+            scenes = []
+            duration_per_scene = 10.0  # duración fija
+            
+            for i, paragraph in enumerate(paragraphs):
+                if paragraph.strip():
+                    scenes.append({
+                        "index": i,
+                        "text": paragraph.strip(),
+                        "start": i * duration_per_scene,
+                        "end": (i + 1) * duration_per_scene,
+                        "duration": duration_per_scene
+                    })
+            return scenes
+
+    def generate_prompts_for_scenes(self, scenes: List[Dict], project_info: Dict, image_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
+        """Genera prompts para las escenas con sistema de fallback robusto."""
+        prompt_obj = image_prompt_config.get('prompt_obj')
+        provider_priority_list = image_prompt_config.get('img_prompt_providers_priority', ['gemini'])
+        
+        if not prompt_obj:
+            logger.warning("No se proporcionó plantilla de prompt. Usando fallback simple.")
+            for scene in scenes:
+                scene['image_prompt'] = f"Photorealistic, cinematic: {scene.get('text', '')[:350]}"
+            return scenes
+
+        system_prompt = prompt_obj.get("system_prompt", "")
+        user_prompt_template = prompt_obj.get("user_prompt", "Generate an image for: {scene_text}")
+
+        for i, scene in enumerate(scenes):
+            user_prompt = user_prompt_template.format(
+                scene_text=scene['text'], 
+                titulo=project_info.get("titulo", ""), 
+                contexto=project_info.get("contexto", "")
+            )
+            
+            generated_prompt = None
+            for provider in provider_priority_list:
+                try:
+                    logger.info(f"[Escena {i+1}] Intentando generar prompt con: {provider.upper()}")
+                    
+                    # Usar modelos específicos si están disponibles, sino usar por defecto
+                    provided_models = image_prompt_config.get('img_prompt_models', {})
+                    if provider in provided_models:
+                        model = provided_models[provider]
+                    else:
+                        # Fallback a modelos por defecto
+                        model_map = {
+                            'gemini': 'models/gemini-2.5-flash-lite-preview-06-17',
+                            'openai': 'gpt-3.5-turbo',
+                            'ollama': 'llama3.2'
+                        }
+                        model = model_map.get(provider, 'default')
+                    
+                    generated_text = ai_service.generate_content(
+                        provider=provider, 
+                        model=model, 
+                        system_prompt=system_prompt, 
+                        user_prompt=user_prompt
+                    )
+                    
+                    if generated_text and "[ERROR]" not in generated_text:
+                        logger.info(f"[Escena {i+1}] ✅ Éxito con {provider.upper()}.")
+                        generated_prompt = generated_text.strip()
+                        break
+                    else:
+                        logger.warning(f"[Escena {i+1}] ⚠️ Fallo leve con {provider.upper()}. Intentando siguiente proveedor.")
+                except Exception as e:
+                    logger.error(f"[Escena {i+1}] ❌ Fallo grave con {provider.upper()}: {e}. Intentando siguiente proveedor.")
+            
+            if not generated_prompt:
+                logger.error(f"[Escena {i+1}] 🚨 Todos los proveedores fallaron. Usando prompt de emergencia.")
+                scene['image_prompt'] = f"Photorealistic, cinematic, high detail: {scene['text'][:350]}"
+            else:
+                scene['image_prompt'] = generated_prompt
+        
         return scenes
 
+    # --- FUNCIÓN HEREDADA PARA COMPATIBILIDAD ---
+    def _generate_prompts_for_scenes(self, scenes: List[Dict], project_info: Dict, img_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
+        """Función heredada para compatibilidad con código existente."""
+        return self.generate_prompts_for_scenes(scenes, project_info, img_prompt_config, ai_service)
 
     def generate_scenes_and_prompts_from_text(self, script_content: str, project_info: Dict, image_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
         project_id_log = project_info.get('id', 'SCENE_TEXT')
@@ -263,7 +404,7 @@ class SceneGenerator:
                  'image_prompt': '' 
              })
 
-        scenes_with_prompts = self._generate_prompts_for_scenes(scenes_base, project_info, image_prompt_config, ai_service)
+        scenes_with_prompts = self.generate_prompts_for_scenes(scenes_base, project_info, image_prompt_config, ai_service)
         return scenes_with_prompts
 
 
@@ -280,7 +421,7 @@ class SceneGenerator:
              logger.error(f"[{project_id_log}] Failed to create timed scenes from transcription.")
              return []
 
-        scenes_with_prompts = self._generate_prompts_for_scenes(timed_scenes, project_info, image_prompt_config, ai_service)
+        scenes_with_prompts = self.generate_prompts_for_scenes(timed_scenes, project_info, image_prompt_config, ai_service)
         
         logger.info(f"[{project_id_log}] Generated {len(scenes_with_prompts)} timed scenes with prompts.")
         return scenes_with_prompts

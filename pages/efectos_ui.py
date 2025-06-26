@@ -1,8 +1,11 @@
 import streamlit as st
 
-def show_effects_ui():
+def show_effects_ui(key_prefix: str = ""):
     """
     Muestra la interfaz de usuario para definir una secuencia de efectos
+    
+    Args:
+        key_prefix: Prefijo para las keys de Streamlit (para evitar conflictos en batch)
     """
     st.header("🎬 Secuencia de Efectos")
     
@@ -45,7 +48,7 @@ def show_effects_ui():
         list(efectos_disponibles.keys()),
         format_func=lambda x: efectos_disponibles[x],
         default=["zoom_in", "zoom_out"],  # Efectos seleccionados por defecto
-        key="efectos_secuencia"
+        key=f"{key_prefix}efectos_secuencia"
     )
     
     # Configurar parámetros para cada efecto seleccionado
@@ -63,7 +66,7 @@ def show_effects_ui():
                 max_value=3.0,
                 value=parametros_por_defecto[efecto]["duration"],
                 step=0.1,
-                key=f"duracion_{efecto}"
+                key=f"{key_prefix}duracion_{efecto}"
             )
         
         # Configurar parámetros específicos para Ken Burns
@@ -76,7 +79,7 @@ def show_effects_ui():
                     max_value=2.0,
                     value=float(parametros_por_defecto[efecto]["zoom_start"]),
                     step=0.1,
-                    key=f"zoom_start_{efecto}"
+                    key=f"{key_prefix}zoom_start_{efecto}"
                 )
                 pan_start_x = st.slider(
                     "Paneo Inicial X",
@@ -84,7 +87,7 @@ def show_effects_ui():
                     max_value=0.5,
                     value=float(parametros_por_defecto[efecto]["pan_start"][0]),
                     step=0.1,
-                    key=f"pan_start_x_{efecto}"
+                    key=f"{key_prefix}pan_start_x_{efecto}"
                 )
                 pan_start_y = st.slider(
                     "Paneo Inicial Y",
@@ -92,7 +95,7 @@ def show_effects_ui():
                     max_value=0.5,
                     value=float(parametros_por_defecto[efecto]["pan_start"][1]),
                     step=0.1,
-                    key=f"pan_start_y_{efecto}"
+                    key=f"{key_prefix}pan_start_y_{efecto}"
                 )
             with col2:
                 params["zoom_end"] = st.slider(
@@ -101,7 +104,7 @@ def show_effects_ui():
                     max_value=2.0,
                     value=float(parametros_por_defecto[efecto]["zoom_end"]),
                     step=0.1,
-                    key=f"zoom_end_{efecto}"
+                    key=f"{key_prefix}zoom_end_{efecto}"
                 )
                 pan_end_x = st.slider(
                     "Paneo Final X",
@@ -109,7 +112,7 @@ def show_effects_ui():
                     max_value=0.5,
                     value=float(parametros_por_defecto[efecto]["pan_end"][0]),
                     step=0.1,
-                    key=f"pan_end_x_{efecto}"
+                    key=f"{key_prefix}pan_end_x_{efecto}"
                 )
                 pan_end_y = st.slider(
                     "Paneo Final Y",
@@ -117,7 +120,7 @@ def show_effects_ui():
                     max_value=0.5,
                     value=float(parametros_por_defecto[efecto]["pan_end"][1]),
                     step=0.1,
-                    key=f"pan_end_y_{efecto}"
+                    key=f"{key_prefix}pan_end_y_{efecto}"
                 )
             # Crear las tuplas de paneo
             params["pan_start"] = (pan_start_x, pan_start_y)
@@ -131,7 +134,7 @@ def show_effects_ui():
                 max_value=3.0,
                 value=parametros_por_defecto[efecto]["zoom_factor"],
                 step=0.1,
-                key=f"zoom_{efecto}"
+                key=f"{key_prefix}zoom_{efecto}"
             )
         
         # Configurar distancia para efectos de paneo
@@ -142,7 +145,7 @@ def show_effects_ui():
                 max_value=1.0,
                 value=parametros_por_defecto[efecto]["distance"],
                 step=0.1,
-                key=f"distancia_{efecto}"
+                key=f"{key_prefix}distancia_{efecto}"
             )
         
         efectos_configurados.append((efecto, params))
