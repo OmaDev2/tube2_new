@@ -180,6 +180,8 @@ class DatabaseManager:
         sql = '''
         SELECT 
             p.id,
+            p.id_canal,
+            p.id_video,
             p.status,
             p.ruta_proyecto,
             p.fecha_planificacion,
