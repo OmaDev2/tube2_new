@@ -47,6 +47,7 @@ def show_batch_processor():
     script_type = st.radio(
         "📜 Tipo de guión:",
         ["🤖 Generar automáticamente con IA", "✍️ Usar guión manual"],
+        index=1,  # Por defecto seleccionar guión manual
         help="Elige si quieres que la IA genere el guión o usar tu propio guión",
         key="script_type_selector"
     )
@@ -334,7 +335,7 @@ def show_batch_processor():
         optimization_config = {}
         optimization_config['generate_optimized_content'] = st.checkbox(
             "Generar contenido optimizado para TODOS los videos", 
-            value=False, 
+            value=True, 
             key="batch_optimize_content",
             help="Genera títulos alternativos, descripción SEO, tags relevantes y capítulos con timestamps para cada video"
         )
@@ -567,7 +568,10 @@ def show_batch_processor():
     
     # Mostrar resumen antes del procesamiento
     if st.session_state.get("batch_projects"):
-        col1, col2, col3 = st.columns(3)
+        st.subheader("📋 Resumen de Configuración")
+        
+        # Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("🎬 Proyectos", len(st.session_state.batch_projects))
         with col2:
@@ -576,11 +580,91 @@ def show_batch_processor():
         with col3:
             overlays_count = len(video_config.get('overlays', [])) if video_config.get('overlays') else 0
             st.metric("🖼️ Overlays", overlays_count)
+        with col4:
+            music_status = "✅ Sí" if audio_config.get('bg_music_selection') else "❌ No"
+            st.metric("🎵 Música", music_status)
+        
+        # Detalles de configuración
+        with st.expander("🔍 Ver Detalles de Configuración"):
+            col_det1, col_det2 = st.columns(2)
+            
+            with col_det1:
+                st.write("**🎵 Audio:**")
+                if audio_config.get('bg_music_selection'):
+                    try:
+                        from pathlib import Path
+                        music_name = Path(audio_config['bg_music_selection']).name
+                    except:
+                        music_name = audio_config['bg_music_selection']
+                    st.write(f"• Música: {music_name}")
+                    st.write(f"• Volumen música: {audio_config.get('music_volume', 0.06)}")
+                else:
+                    st.write("• ❌ Sin música de fondo")
+                
+                st.write(f"• Voz: {audio_config.get('tts_voice', 'N/A')}")
+                st.write(f"• Velocidad: {audio_config.get('tts_speed_percent', 0)}%")
+            
+            with col_det2:
+                st.write("**✨ Efectos Visuales:**")
+                if efectos_count > 0:
+                    st.write(f"• {efectos_count} efecto(s) configurado(s)")
+                else:
+                    st.write("• ❌ Sin efectos configurados")
+                
+                st.write("**🖼️ Overlays:**")
+                if overlays_count > 0:
+                    st.write(f"• {overlays_count} overlay(s) configurado(s)")
+                else:
+                    st.write("• ❌ Sin overlays configurados")
     
     if st.button("🎬 PROCESAR TODOS LOS PROYECTOS", type="primary", use_container_width=True):
         if not st.session_state.batch_projects:
             st.warning("⚠️ No hay proyectos para procesar. Añade al menos un proyecto.")
             return
+        
+        # ===== VALIDACIONES ANTES DEL PROCESAMIENTO =====
+        validaciones_faltantes = []
+        
+        # Verificar música de fondo
+        if not audio_config.get('bg_music_selection'):
+            validaciones_faltantes.append("🎵 **Música de fondo**: No has seleccionado música de fondo")
+        
+        # Verificar overlays
+        overlays_configurados = video_config.get('overlays', [])
+        if not overlays_configurados or len(overlays_configurados) == 0:
+            validaciones_faltantes.append("🖼️ **Overlays**: No has configurado ningún overlay")
+        
+        # Verificar efectos (advertencia suave, no obligatorio)
+        efectos_configurados = video_config.get('effects', [])
+        if not efectos_configurados or len(efectos_configurados) == 0:
+            validaciones_faltantes.append("✨ **Efectos visuales**: No has configurado efectos visuales (opcional pero recomendado)")
+        
+        # Mostrar advertencias si faltan configuraciones
+        if validaciones_faltantes:
+            st.error("⚠️ **Configuraciones faltantes detectadas:**")
+            for validacion in validaciones_faltantes:
+                st.write(f"• {validacion}")
+            
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("❌ Cancelar y Configurar", type="secondary", use_container_width=True):
+                    st.info("💡 **Sugerencias:**")
+                    if not audio_config.get('bg_music_selection'):
+                        st.write("• Ve a la sección **'🔊 Configuración de Audio'** y selecciona una música de fondo")
+                    if not overlays_configurados:
+                        st.write("• Ve a la sección **'✨ Efectos y Overlays'** y configura algunos overlays")
+                    if not efectos_configurados:
+                        st.write("• Ve a la sección **'✨ Efectos y Overlays'** y configura algunos efectos visuales")
+                    return
+            
+            with col2:
+                continuar_sin_config = st.button("⚡ Continuar Sin Estas Configuraciones", type="primary", use_container_width=True)
+                if not continuar_sin_config:
+                    return
+                else:
+                    st.warning("⚠️ Continuando sin todas las configuraciones recomendadas...")
         
         st.info("🔄 Iniciando procesamiento por lotes... Esto puede tardar varios minutos.")
         
@@ -660,6 +744,15 @@ def show_batch_processor():
         # Mostrar resultados
         mostrar_resultados_batch(resultados)
         
+        # Limpiar automáticamente proyectos completados del CMS de la cola
+        proyectos_completados_cms = [r for r in resultados if r.get("cms_updated", False) and r["estado"] == "completado"]
+        if proyectos_completados_cms:
+            st.session_state.batch_projects = [
+                p for p in st.session_state.batch_projects 
+                if not (p.get("cms_publicacion_id") in [r.get("cms_publicacion_id") for r in proyectos_completados_cms])
+            ]
+            st.info(f"🧹 Limpieza automática: {len(proyectos_completados_cms)} proyecto(s) del CMS eliminados de la cola")
+        
         # Limpiar progreso
         progress_container.empty()
         status_container.empty()
@@ -724,6 +817,7 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
             
             # Actualizar estado en CMS si el proyecto viene del CMS
+            cms_updated = False
             if "cms_publicacion_id" in proyecto:
                 try:
                     # Importar y usar DatabaseManager para actualizar estado
@@ -740,9 +834,30 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
                         'Generado', 
                         str(proyecto_dir)
                     )
+                    cms_updated = True
+                    print(f"✅ CMS actualizado: Publicación {proyecto['cms_publicacion_id']} → 'Generado'")
+                    
+                    # También actualizar el metadata con el resultado
+                    metadata["cms_update_result"] = "success"
+                    metadata["cms_update_timestamp"] = datetime.now().isoformat()
+                    
                 except Exception as e:
                     # Si falla la actualización del CMS, continuar pero registrar el error
-                    print(f"Warning: No se pudo actualizar estado en CMS: {e}")
+                    print(f"❌ Error actualizando CMS: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Guardar error en metadata
+                    metadata["cms_update_result"] = "error"
+                    metadata["cms_update_error"] = str(e)
+                    metadata["cms_update_timestamp"] = datetime.now().isoformat()
+                    
+                # Re-escribir metadata con información de CMS
+                try:
+                    with open(metadata_path, "w", encoding="utf-8") as f:
+                        json.dump(metadata, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    print(f"Warning: No se pudo actualizar metadata: {e}")
             
             return {
                 "titulo": proyecto["titulo"],
@@ -750,7 +865,8 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
                 "video_path": str(result_path) if result_path else None,
                 "proyecto_dir": str(proyecto_dir),
                 "metadata": metadata,
-                "cms_updated": "cms_publicacion_id" in proyecto
+                "cms_updated": cms_updated,
+                "cms_publicacion_id": proyecto.get("cms_publicacion_id")
             }
         else:
             return {
@@ -911,14 +1027,14 @@ def _render_batch_subtitles_config():
         with col1:
             try:
                 available_fonts = get_available_fonts()
-                default_font = "Arial"
+                default_font = "Impact"
                 font_index = available_fonts.index(default_font) if default_font in available_fonts else 0
             except:
-                available_fonts = ["Arial", "Helvetica", "Times New Roman", "Calibri"]
-                font_index = 0
+                available_fonts = ["Arial", "Helvetica", "Times New Roman", "Calibri", "Impact"]
+                font_index = 4 if "Impact" in available_fonts else 0
                 
             sub_config['font'] = st.selectbox("Fuente", available_fonts, index=font_index, key="batch_sub_font")
-            sub_config['size'] = st.slider("Tamaño", 16, 72, 54, key="batch_sub_size")
+            sub_config['size'] = st.slider("Tamaño", 16, 72, 64, key="batch_sub_size")
         with col2:
             sub_config['color'] = st.color_picker("Color Texto", "#FFFFFF", key="batch_sub_color")
             sub_config['stroke_color'] = st.color_picker("Color Borde", "#000000", key="batch_sub_stroke_color")

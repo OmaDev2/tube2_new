@@ -50,29 +50,20 @@ class DatabaseManager:
                 )
                 ''')
                 
-                # Tabla para la Biblioteca de Videos (plantillas)
-                conn.execute('''
-                CREATE TABLE IF NOT EXISTS Videos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    titulo_base TEXT NOT NULL,
-                    guion TEXT,
-                    contexto TEXT,
-                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                ''')
-
-                # Tabla de Publicaciones (el corazón del sistema)
+                # Tabla de Publicaciones (estructura simplificada - todo en uno)
                 conn.execute('''
                 CREATE TABLE IF NOT EXISTS Publicaciones (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    titulo TEXT NOT NULL,
+                    guion TEXT,
+                    contexto TEXT,
                     id_canal INTEGER NOT NULL,
-                    id_video INTEGER NOT NULL,
                     status TEXT NOT NULL CHECK(status IN ('Pendiente', 'En Batch', 'Generando', 'Generado', 'Subido', 'Error')),
+                    script_type TEXT DEFAULT 'manual',
                     ruta_proyecto TEXT,
                     fecha_planificacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     fecha_subida TIMESTAMP,
-                    FOREIGN KEY (id_canal) REFERENCES Canales (id),
-                    FOREIGN KEY (id_video) REFERENCES Videos (id)
+                    FOREIGN KEY (id_canal) REFERENCES Canales (id)
                 )
                 ''')
                 logger.info(f"Base de datos inicializada correctamente en {self.db_path}")
@@ -114,83 +105,40 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    # --- Operaciones para Videos (Biblioteca) ---
+    # --- Operaciones para Publicaciones (estructura simplificada) ---
 
-    def add_video(self, titulo_base: str, guion: str, contexto: str) -> Optional[int]:
-        """Añade un nuevo video a la biblioteca. Devuelve su ID."""
-        sql = 'INSERT INTO Videos (titulo_base, guion, contexto) VALUES (?, ?, ?)'
+    def add_publicacion(self, titulo: str, guion: str, contexto: str, id_canal: int, script_type: str = 'manual') -> Optional[int]:
+        """Crea una nueva publicación con todos los datos."""
+        sql = 'INSERT INTO Publicaciones (titulo, guion, contexto, id_canal, script_type, status) VALUES (?, ?, ?, ?, ?, ?)'
         conn = self._get_connection()
         try:
             with conn:
-                cursor = conn.execute(sql, (titulo_base, guion, contexto))
-                logger.info(f"Video '{titulo_base}' añadido a la biblioteca.")
+                cursor = conn.execute(sql, (titulo, guion, contexto, id_canal, script_type, 'Pendiente'))
+                logger.info(f"Publicación '{titulo}' creada para canal {id_canal} ({script_type}).")
                 return cursor.lastrowid
         except sqlite3.Error as e:
-            logger.error(f"Error al añadir el video '{titulo_base}': {e}", exc_info=True)
-            return None
-        finally:
-            conn.close()
-
-    def get_all_videos(self) -> List[Dict[str, Any]]:
-        """Obtiene todos los videos de la biblioteca."""
-        sql = 'SELECT id, titulo_base FROM Videos ORDER BY titulo_base'
-        conn = self._get_connection()
-        try:
-            cursor = conn.execute(sql)
-            return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.Error as e:
-            logger.error(f"Error al obtener todos los videos: {e}", exc_info=True)
-            return []
-        finally:
-            conn.close()
-            
-    def get_video_details(self, video_id: int) -> Optional[Dict[str, Any]]:
-        """Obtiene todos los detalles de un video específico."""
-        sql = 'SELECT * FROM Videos WHERE id = ?'
-        conn = self._get_connection()
-        try:
-            cursor = conn.execute(sql, (video_id,))
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        except sqlite3.Error as e:
-            logger.error(f"Error al obtener detalles del video {video_id}: {e}", exc_info=True)
-            return None
-        finally:
-            conn.close()
-
-    # --- Operaciones para Publicaciones ---
-
-    def add_publicacion(self, id_canal: int, id_video: int) -> Optional[int]:
-        """Planifica una nueva publicación."""
-        sql = 'INSERT INTO Publicaciones (id_canal, id_video, status) VALUES (?, ?, ?)'
-        conn = self._get_connection()
-        try:
-            with conn:
-                cursor = conn.execute(sql, (id_canal, id_video, 'Pendiente'))
-                logger.info(f"Publicación planificada para canal {id_canal} y video {id_video}.")
-                return cursor.lastrowid
-        except sqlite3.Error as e:
-            logger.error(f"Error al añadir la publicación: {e}", exc_info=True)
+            logger.error(f"Error al crear la publicación '{titulo}': {e}", exc_info=True)
             return None
         finally:
             conn.close()
 
     def get_all_publicaciones_info(self) -> List[Dict[str, Any]]:
-        """Obtiene una vista enriquecida de todas las publicaciones."""
+        """Obtiene todas las publicaciones con información enriquecida."""
         sql = '''
         SELECT 
             p.id,
+            p.titulo,
+            p.guion,
+            p.contexto,
             p.id_canal,
-            p.id_video,
             p.status,
+            p.script_type,
             p.ruta_proyecto,
             p.fecha_planificacion,
             p.fecha_subida,
-            c.nombre as nombre_canal,
-            v.titulo_base as titulo_video
+            c.nombre as nombre_canal
         FROM Publicaciones p
         JOIN Canales c ON p.id_canal = c.id
-        JOIN Videos v ON p.id_video = v.id
         ORDER BY p.fecha_planificacion DESC
         '''
         conn = self._get_connection()
@@ -200,6 +148,65 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"Error al obtener la información de publicaciones: {e}", exc_info=True)
             return []
+        finally:
+            conn.close()
+            
+    def get_publicacion_details(self, publicacion_id: int) -> Optional[Dict[str, Any]]:
+        """Obtiene todos los detalles de una publicación específica."""
+        sql = '''
+        SELECT 
+            p.*,
+            c.nombre as nombre_canal
+        FROM Publicaciones p
+        JOIN Canales c ON p.id_canal = c.id
+        WHERE p.id = ?
+        '''
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(sql, (publicacion_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        except sqlite3.Error as e:
+            logger.error(f"Error al obtener detalles de la publicación {publicacion_id}: {e}", exc_info=True)
+            return None
+        finally:
+            conn.close()
+
+    def update_publicacion(self, publicacion_id: int, titulo: str = None, guion: str = None, contexto: str = None, script_type: str = None) -> bool:
+        """Actualiza los datos de una publicación."""
+        updates = []
+        params = []
+        
+        if titulo is not None:
+            updates.append("titulo = ?")
+            params.append(titulo)
+        if guion is not None:
+            updates.append("guion = ?")
+            params.append(guion)
+        if contexto is not None:
+            updates.append("contexto = ?")
+            params.append(contexto)
+        if script_type is not None:
+            updates.append("script_type = ?")
+            params.append(script_type)
+            
+        if not updates:
+            return True  # No hay nada que actualizar
+            
+        sql = f'UPDATE Publicaciones SET {", ".join(updates)} WHERE id = ?'
+        params.append(publicacion_id)
+        
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.execute(sql, params)
+                success = cursor.rowcount > 0
+                if success:
+                    logger.info(f"Publicación {publicacion_id} actualizada exitosamente.")
+                return success
+        except sqlite3.Error as e:
+            logger.error(f"Error al actualizar la publicación {publicacion_id}: {e}", exc_info=True)
+            return False
         finally:
             conn.close()
             
@@ -220,6 +227,25 @@ class DatabaseManager:
                 logger.info(f"Estado de la publicación {id_publicacion} actualizado a '{status}'.")
         except sqlite3.Error as e:
             logger.error(f"Error al actualizar la publicación {id_publicacion}: {e}", exc_info=True)
+        finally:
+            conn.close()
+
+    def delete_publicacion(self, id_publicacion: int) -> bool:
+        """Elimina una publicación de la base de datos. Devuelve True si fue exitoso."""
+        sql = 'DELETE FROM Publicaciones WHERE id = ?'
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.execute(sql, (id_publicacion,))
+                if cursor.rowcount > 0:
+                    logger.info(f"Publicación {id_publicacion} eliminada exitosamente.")
+                    return True
+                else:
+                    logger.warning(f"No se encontró la publicación {id_publicacion} para eliminar.")
+                    return False
+        except sqlite3.Error as e:
+            logger.error(f"Error al eliminar la publicación {id_publicacion}: {e}", exc_info=True)
+            return False
         finally:
             conn.close()
 

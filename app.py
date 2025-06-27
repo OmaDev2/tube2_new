@@ -10,9 +10,10 @@ if str(ROOT_DIR) not in sys.path:
 
 from pages.batch_page import render_batch
 from pages.video_generator import show_video_generator
-from pages.video_generator_page import render_video_generator
 from pages.prompts_manager_page import render_prompts_manager
-from pages.settings_page import render_settings
+from pages.settings_page import show_settings_page
+from pages.gestion_canales_page import render_gestion_canales
+from pages.panel_publicaciones_page import render_panel_publicaciones
 
 import logging # Importar logging
 
@@ -50,10 +51,11 @@ def main():
     st.sidebar.title("Navegación")
     page = st.sidebar.radio("Selecciona una página", [
         "🚀 Procesador por Lotes", 
-        "🎥 Generador Individual", 
-        "📝 Generador de Videos", 
+        "🎥 Generador Manual", 
         "📋 Gestor de Prompts", 
-        "⚙️ Configuración de APIs", 
+        "⚙️ Configuración Central", 
+        "📺 Gestión de Canales",
+        "🗓️ Panel de Publicaciones",
         "📊 Historial"
     ])
     
@@ -61,14 +63,16 @@ def main():
     try:
         if page == "🚀 Procesador por Lotes":
             render_batch(app_config)
-        elif page == "🎥 Generador Individual":
+        elif page == "🎥 Generador Manual":
             show_video_generator()
-        elif page == "📝 Generador de Videos":
-            render_video_generator(app_config)
         elif page == "📋 Gestor de Prompts":
             render_prompts_manager(app_config)
-        elif page == "⚙️ Configuración de APIs":
-            render_settings(app_config)
+        elif page == "⚙️ Configuración Central":
+            show_settings_page()
+        elif page == "📺 Gestión de Canales":
+            render_gestion_canales()
+        elif page == "🗓️ Panel de Publicaciones":
+            render_panel_publicaciones(app_config)
         elif page == "📊 Historial":
             st.warning("Historial aún no implementado")
     except Exception as e:

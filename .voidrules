@@ -1,42 +1,62 @@
-# Configuración para generación de videos
+# .voidrules
+# Configuración global para la generación de vídeo
+
 video_generation:
-  # Calidad y formato
+  # Calidad y codificación del vídeo final
   quality:
-    resolution: "1920x1080"
-    bitrate: "5000k"
-    audio_bitrate: "192k"
-    output_format: "mp4"
+    resolution: "1920x1080" # Resolución del vídeo (ej: "1920x1080", "1280x720")
+    bitrate: "5000k"       # Bitrate de vídeo (ej: "5000k" para 5 Mbps)
+    audio_bitrate: "192k"  # Bitrate de audio (ej: "192k")
 
-  # Opciones de audio
+  # Rutas de directorios
+  paths:
+    projects_dir: "projects"          # Donde se guardan los proyectos individuales
+    assets: "overlays"                # Directorio de overlays y otros assets
+    output_dir: "output"              # Directorio de salida de vídeos finales
+    background_music_dir: "background_music" # Directorio de música de fondo
+
+  # Configuración de audio (TTS y música)
   audio:
-    background_music: "background_music/Yoga Style - Chris Haugen.mp3"
-    normalize_volume: true
-    match_video_duration: true
+    default_voice: "es-ES-AlvaroNeural" # Voz TTS por defecto (ej: "es-ES-AlvaroNeural", "en-US-JennyNeural")
 
-  # Efectos y overlays
-  effects:
-    overlays:
-      - name: "overlays/sparkes_vonv_lossy.webm"
-        opacity: 0.3
-        position: "center"
-        loop: true
-
-  # Subtítulos
+  # Configuración de subtítulos
   subtitles:
     font: "Arial"
     font_size: 24
-    font_color: "#FFFFFF"
+    color: "#FFFFFF"
     outline_color: "#000000"
-    position: "bottom"
-    enable: true
+    stroke_width: 1.5
+    position: "bottom" # "top", "center", "bottom"
 
-  # Generación por lotes
-  batch_processing:
-    max_parallel_videos: 3
-    auto_cleanup: true
+  # Configuración de imágenes (si no se especifica en la UI)
+  image:
+    img_provider: "Replicate"
+    img_model: "black-forest-labs/flux-schnell"
+    img_prompt_provider: "gemini"
+    img_prompt_model: "models/gemini-2.5-flash-lite-preview-06-17"
+    aspect_ratio: "16:9"
+    output_format: "webp"
+    output_quality: 85
+    megapixels: "1"
+    style: "" # Estilo global para prompts de imagen si no se especifica
 
-  # Rutas críticas
-  paths:
-    assets: "overlays/"
-    audio_source: "data/"
-    output_dir: "output/"
+  # Configuración de escenas
+  scenes:
+    segmentation_mode: "Por Párrafos (Híbrido)" # Modo de segmentación por defecto
+
+  # Configuración de vídeo (transiciones, efectos, etc.)
+  video:
+    use_auto_duration: true
+    duration_per_image_manual: 10.0
+    transition_type: "dissolve"
+    transition_duration: 1.0
+    fade_in: 1.0
+    fade_out: 1.0
+    effects: [] # Lista de efectos globales por defecto
+    overlays: [] # Lista de overlays globales por defecto
+
+  # Configuración de optimización de contenido
+  optimization:
+    generate_optimized_content: true
+    use_same_style: true
+    generate_series_tags: true

@@ -2,17 +2,14 @@
 import streamlit as st
 import yaml
 from pathlib import Path
-import os
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Ruta al config.yaml en el directorio RAÍZ (donde está app.py)
+# Ruta al config.yaml en el directorio RAÍZ
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
-# --- Valores por Defecto ---
-# Define aquí una estructura completa por si hay que crear el archivo
+# --- ÚNICA FUENTE DE VERDAD PARA LA CONFIGURACIÓN POR DEFECTO ---
 DEFAULT_CONFIG = {
     "ai": {
         "openai_api_key": "TU_CLAVE_OPENAI_AQUI",
@@ -20,103 +17,125 @@ DEFAULT_CONFIG = {
         "replicate_api_key": "TU_CLAVE_REPLICATE_AQUI",
         "ollama_base_url": "http://localhost:11434",
         "default_models": {
-            "openai": "gpt-3.5-turbo",
-            "openai_list": ["gpt-3.5-turbo", "gpt-4"],
-            "gemini": "models/gemini-1.5-pro-latest",
-            "gemini_list": ["models/gemini-1.5-pro-latest", "models/gemini-pro"],
+            "openai": "gpt-4o-mini",
+            "gemini": "models/gemini-1.5-flash-latest",
             "ollama": "llama3",
-            "ollama_list": ["llama3", "mistral"],
-            "image": "flux-schnell",
-            "voice": "es-MX-JorgeNeural"
+            "image_generation": "black-forest-labs/flux-schnell",
+            "image_prompt_generation": "models/gemini-1.5-flash-latest",
+            "default_voice": "es-ES-AlvaroNeural"
         }
     },
-    "storage": {
-        "type": "local",
-        "local_path": "./videos_generados" # Carpeta de proyectos
-    },
-    "video": {
-        "default_resolution": "1080p",
-        "default_fps": 30
+    "video_generation": {
+        "quality": {
+            "resolution": "1920x1080",
+            "fps": 24,
+            "bitrate": "5000k",
+            "audio_bitrate": "192k"
+        },
+        "paths": {
+            "projects_dir": "projects",
+            "assets_dir": "overlays",
+            "output_dir": "output",
+            "background_music_dir": "background_music"
+        },
+        "subtitles": {
+            "enable": True,
+            "font": "Arial",
+            "font_size": 24,
+            "font_color": "#FFFFFF",
+            "stroke_color": "#000000",
+            "stroke_width": 1.5,
+            "position": "bottom",
+            "max_words": 7
+        },
+        "transitions": {
+            "default_type": "dissolve",
+            "default_duration": 1.0
+        },
+        "audio": {
+            "default_music_volume": 0.08,
+            "normalize_audio": True
+        }
     }
 }
 
 # --- Funciones ---
 
-@st.cache_data(ttl=300) # Cachear por 5 minutos
+@st.cache_data(ttl=60) # Cachear por 1 minuto para reflejar cambios recientes
 def load_config() -> dict:
-    """Carga config.yaml. Crea uno básico si no existe."""
+    """
+    Carga config.yaml. Si no existe, lo crea con los valores de DEFAULT_CONFIG.
+    Si existe pero le faltan claves, las añade desde DEFAULT_CONFIG.
+    """
     if not CONFIG_PATH.exists():
-        logger.warning(f"No se encontró {CONFIG_PATH}. Creando archivo básico.")
-        # Crear directamente el archivo default
+        logger.warning(f"No se encontró {CONFIG_PATH}. Creando archivo de configuración por defecto.")
         try:
-             with open(CONFIG_PATH, "w", encoding='utf-8') as f:
-                  yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-             logger.info(f"Archivo config.yaml básico creado en {CONFIG_PATH}. Por favor, edítalo.")
-             # No mostrar st.warning aquí para evitar errores de Streamlit
+            with open(CONFIG_PATH, "w", encoding='utf-8') as f:
+                yaml.dump(DEFAULT_CONFIG, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            logger.info(f"Archivo config.yaml creado en {CONFIG_PATH}. Por favor, edita tus claves de API.")
+            return DEFAULT_CONFIG
         except Exception as e:
-             # Mostrar error solo si estamos en un contexto de Streamlit activo
-             try: st.error(f"No se pudo crear config.yaml: {e}")
-             except: logger.error(f"No se pudo crear config.yaml: {e}")
-             return DEFAULT_CONFIG # Devolver default aunque no se guardara
-        return DEFAULT_CONFIG
+            logger.error(f"No se pudo crear config.yaml: {e}")
+            return DEFAULT_CONFIG
 
     try:
         with open(CONFIG_PATH, "r", encoding='utf-8') as f:
-            config_data = yaml.safe_load(f)
-            if config_data is None:
-                 logger.warning(f"{CONFIG_PATH} está vacío. Usando configuración por defecto.")
-                 return DEFAULT_CONFIG # Devolver default si está vacío
+            user_config = yaml.safe_load(f)
+            if not isinstance(user_config, dict):
+                logger.error(f"El archivo {CONFIG_PATH} está corrupto o no es un diccionario. Usando configuración por defecto.")
+                return DEFAULT_CONFIG
 
-            # Validaciones mínimas (opcional pero útil)
-            config_data.setdefault("storage", {}).setdefault("local_path", "./videos_generados")
+        # Fusionar la configuración del usuario con la por defecto para asegurar que todas las claves existan
+        config = _merge_configs(DEFAULT_CONFIG, user_config)
+        
+        logger.info(f"Configuración cargada y validada desde {CONFIG_PATH}")
+        return config
 
-            logger.info(f"Configuración cargada desde {CONFIG_PATH}")
-            return config_data
-    except yaml.YAMLError as e:
-         logger.error(f"Error de sintaxis YAML en {CONFIG_PATH}: {e}")
-         try: st.error(f"Error de sintaxis YAML en {CONFIG_PATH}: {e}. Revisa el archivo.")
-         except: pass
-         return DEFAULT_CONFIG # Fallback
-    except Exception as e:
-        logger.error(f"Error inesperado al leer {CONFIG_PATH}: {e}")
-        try: st.error(f"Error inesperado al leer {CONFIG_PATH}: {e}")
-        except: pass
-        return DEFAULT_CONFIG # Fallback
-
+    except (yaml.YAMLError, IOError) as e:
+        logger.error(f"Error al leer o parsear {CONFIG_PATH}: {e}. Usando configuración por defecto.")
+        return DEFAULT_CONFIG
 
 def save_config(config_data: dict) -> bool:
     """Guarda el diccionario de configuración en config.yaml."""
     try:
-        projects_dir_str = config_data.get("storage",{}).get("local_path", "./videos_generados")
-        Path(projects_dir_str).mkdir(parents=True, exist_ok=True)
+        # Crear directorios necesarios antes de guardar
+        _create_project_dirs(config_data)
 
         with open(CONFIG_PATH, "w", encoding='utf-8') as f:
             yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-        # Limpiar cachés relevantes
+        # Limpiar la caché para que la próxima lectura obtenga los datos nuevos
         load_config.clear()
-        get_projects_dir.clear()
-
-        logger.info(f"Configuración guardada en {CONFIG_PATH}")
-        # El mensaje de éxito es mejor mostrarlo en la UI que llama a esta función
+        logger.info(f"Configuración guardada exitosamente en {CONFIG_PATH}")
+        st.success("¡Configuración guardada exitosamente!")
         return True
     except Exception as e:
         logger.error(f"Error al guardar la configuración en {CONFIG_PATH}: {e}")
-        try: st.error(f"Error al guardar la configuración: {e}")
-        except: pass
+        st.error(f"Error al guardar la configuración: {e}")
         return False
 
-@st.cache_data(ttl=300) # Cachear la ruta
-def get_projects_dir() -> Path:
-     """Obtiene la ruta Path configurada para guardar proyectos. La crea si no existe."""
-     cfg = load_config()
-     projects_path_str = cfg.get("storage", {}).get("local_path", "./projects")
-     projects_dir = Path(projects_path_str).resolve()
-     try:
-        projects_dir.mkdir(parents=True, exist_ok=True)
-        # logger.info(f"Directorio de proyectos: {projects_dir}") # Opcional: puede ser mucho log
-     except Exception as e:
-          logger.error(f"No se pudo crear/acceder al directorio de proyectos: {projects_dir}. Error: {e}")
-          try: st.error(f"Error con el directorio de proyectos {projects_dir}: {e}")
-          except: pass
-     return projects_dir
+def _merge_configs(default: dict, user: dict) -> dict:
+    """
+    Combina recursivamente la configuración del usuario con la por defecto.
+    Las claves del usuario tienen prioridad.
+    """
+    merged = default.copy()
+    for key, value in user.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_configs(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+def _create_project_dirs(config: dict):
+    """Crea los directorios definidos en la configuración si no existen."""
+    paths = config.get("video_generation", {}).get("paths", {})
+    for key, path_str in paths.items():
+        try:
+            Path(path_str).mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"No se pudo crear el directorio '{path_str}' definido en la configuración: {e}")
+
+def get_config() -> dict:
+    """Función de conveniencia para obtener la configuración actual."""
+    return load_config()

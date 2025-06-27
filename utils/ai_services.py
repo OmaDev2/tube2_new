@@ -12,7 +12,6 @@ import logging
 from typing import Union, Optional, Dict, List # Mover imports de typing al principio
 
 # Configuración logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- Cargar Configuración --- 

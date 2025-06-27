@@ -2,6 +2,10 @@ import streamlit as st
 from utils.overlays import OverlayManager
 from typing import List, Tuple, Optional
 
+@st.cache_resource
+def get_overlay_manager():
+    return OverlayManager()
+
 def show_overlays_ui(key_prefix: str = "") -> List[Tuple[str, float, float, Optional[float]]]:
     """
     Muestra la interfaz de usuario para seleccionar overlays.
@@ -14,8 +18,8 @@ def show_overlays_ui(key_prefix: str = "") -> List[Tuple[str, float, float, Opti
     """
     st.header("🎨 Overlays de Video")
     
-    # Inicializar el gestor de overlays
-    overlay_manager = OverlayManager()
+    # Inicializar el gestor de overlays (ahora cacheado)
+    overlay_manager = get_overlay_manager()
     available_overlays = overlay_manager.get_available_overlays()
     
     if not available_overlays:

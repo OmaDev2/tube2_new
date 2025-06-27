@@ -78,23 +78,11 @@ class OverlayManager:
                 native_duration = overlay_original.duration
 
                 if native_duration < target_duration:
-                    logger.info(f"Overlay '{overlay_name}' (Dur: {native_duration:.2f}s) es más corto que el objetivo ({target_duration:.2f}s). Aplicando bucle manual.")
-                    # Usar bucle manual más seguro
-                    loops_needed = int(target_duration / native_duration) + 1
-                    overlay_clips = []
-                    current_time = 0
-                    for i in range(loops_needed):
-                        if current_time >= target_duration:
-                            break
-                        clip_segment = overlay_original
-                        remaining_time = target_duration - current_time
-                        if remaining_time < native_duration:
-                            clip_segment = overlay_original.subclip(0, remaining_time)
-                        overlay_clips.append(clip_segment)
-                        current_time += clip_segment.duration
-                    
-                    from moviepy.editor import concatenate_videoclips
-                    overlay_processed = concatenate_videoclips(overlay_clips)
+                    logger.info(f"Overlay '{overlay_name}' (Dur: {native_duration:.2f}s) es más corto que el objetivo ({target_duration:.2f}s). Aplicando extensión sin bucle.")
+                    # SOLUCIÓN DEFINITIVA: Usar solo extensión de duración, NO concatenación
+                    # Esto evita completamente los problemas de frames inexistentes
+                    overlay_processed = overlay_original.set_duration(target_duration)
+                    logger.info(f"Overlay '{overlay_name}' extendido a {target_duration:.2f}s usando repetición del último frame.")
                     
                 elif native_duration > target_duration:
                     logger.info(f"Overlay '{overlay_name}' es más largo. Recortando a {target_duration:.2f}s.")

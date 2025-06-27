@@ -1,161 +1,124 @@
+# pages/settings_page.py
 import streamlit as st
 from pathlib import Path
-import yaml
-import sys
+from utils.config import load_config, save_config
 
-# Añadir el directorio raíz del proyecto al sys.path
-# Esto permite que el script encuentre la carpeta 'utils'
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
 
-from utils.config import load_config
 
-def render_settings(app_config):
-    """Renderiza la página de configuración"""
-    st.title("⚙️ Configuración del Proyecto")
-    st.markdown("Ver y editar configuración actual")
-    
-    tab1, tab2 = st.tabs(["Configuración actual", "Configuración por defecto"])
-    
-    # --- Pestaña 1: Configuración Actual ---
-    with tab1:
-        try:
-            voidrules_path = Path(__file__).parent.parent / ".voidrules"
-            if voidrules_path.exists():
-                with open(voidrules_path, "r") as f:
-                    void_conf = yaml.safe_load(f)
-                st.code(yaml.dump(void_conf, allow_unicode=True, default_flow_style=False), language="yaml")
-            else:
-                st.warning("Archivo .voidrules no encontrado")
-        except Exception as e:
-            st.error(f"No se pudo cargar .voidrules: {e}")
-    
-    # --- Pestaña 2: Configuración por defecto ---
-    with tab2:
-        st.markdown("### 📁 Configuración cargada del proyecto")
-        try:
-            if app_config:
-                st.code(yaml.dump(app_config, allow_unicode=True, default_flow_style=False), language="yaml")
-            else:
-                st.info("Ninguna configuración cargada")
-        except Exception:
-            st.info("No hay configuración para mostrar")
-    
-    st.markdown("---")
-    
-    # --- Editar archivo .voidrules ---
-    if st.checkbox("🛠️ Editar configuración manualmente"):
-        try:
-            with open(".voidrules", "r") as f:
-                void_data = f.read()
-            edited_config = st.text_area("Editar .voidrules", void_data, height=300)
-            
-            if st.button("Guardar Configuración"):
-                with open(".voidrules", "w") as f:
-                    f.write(edited_config)
-                st.success("Configuración guardada exitosamente")
-                st.rerun()
-                
-        except Exception as e:
-            st.error(f"No se pudo cargar el archivo: {e}")
+def show_settings_page():
+    """Renderiza la página de configuración completa y centralizada."""
+    st.title("⚙️ Configuración Central del Proyecto")
+    st.markdown("Aquí puedes gestionar todos los ajustes de la aplicación. Los cambios se guardan en `config.yaml`.")
 
-    if st.checkbox("📊 Ver información del proyecto"):
-        if "loaded_project" in st.session_state:
-            st.json(st.session_state.loaded_project)
-        else:
-            st.warning("No hay proyecto cargado")
+    config = load_config()
 
-def render_settings_page(app_config):
-    st.title("⚙️ Configuración del Sistema")
-    st.markdown("Gestiona la configuración global de la aplicación y revisa el estado de los servicios.")
-    st.divider()
-    
-    # Tabs para organizar mejor
-    tab1, tab2, tab3, tab4 = st.tabs(["🤖 Servicios IA", "🎵 Audio", "🎬 Video", "📁 Rutas"])
-    
-    with tab1:
-        st.header("Servicios de Inteligencia Artificial")
+    # Usar pestañas para una organización clara
+    tab_ai, tab_video, tab_subtitles, tab_paths = st.tabs([
+        "🤖 Inteligencia Artificial",
+        "🎬 Calidad de Video y Audio",
+        "📝 Subtítulos y Transiciones",
+        "📁 Rutas y Directorios"
+    ])
+
+    # --- Pestaña de IA ---
+    with tab_ai:
+        st.header("Claves de API y Modelos por Defecto")
+        ai_config = config.get("ai", {})
         
-        # Mostrar información de proveedores disponibles
-        from utils.ai_services import get_available_providers_info
-        providers_info = get_available_providers_info()
-        
-        st.subheader("🔍 Estado de Proveedores de IA")
-        
-        for provider_name, info in providers_info.items():
-            provider_display_name = {
-                'openai': '🟢 OpenAI',
-                'gemini': '🔵 Google Gemini', 
-                'ollama': '🟠 Ollama (Local)'
-            }.get(provider_name, provider_name.title())
-            
-            with st.expander(f"{provider_display_name} - {info['status']}", expanded=info['configured']):
-                col1, col2 = st.columns([2, 1])
-                
-                with col1:
-                    if info['configured']:
-                        st.success(f"✅ {provider_display_name} está configurado y listo para usar")
-                    else:
-                        st.error(f"❌ {provider_display_name} no está configurado")
-                        
-                        if provider_name == 'openai':
-                            st.info("💡 Configura `OPENAI_API_KEY` en variables de entorno o config.yaml")
-                        elif provider_name == 'gemini':
-                            st.info("💡 Configura `GEMINI_API_KEY` en variables de entorno o config.yaml")
+        with st.expander("🔑 Claves de API", expanded=True):
+            ai_config["openai_api_key"] = st.text_input("OpenAI API Key", value=ai_config.get("openai_api_key", ""), type="password")
+            ai_config["gemini_api_key"] = st.text_input("Gemini API Key", value=ai_config.get("gemini_api_key", ""), type="password")
+            ai_config["replicate_api_key"] = st.text_input("Replicate API Key", value=ai_config.get("replicate_api_key", ""), type="password")
+            ai_config["ollama_base_url"] = st.text_input("Ollama Base URL", value=ai_config.get("ollama_base_url", "http://localhost:11434"))
 
-                        elif provider_name == 'ollama':
-                            st.info("💡 Configura `OLLAMA_BASE_URL` en variables de entorno o config.yaml")
-                
-                with col2:
-                    if info['configured']:
-                        st.metric("Estado", "🟢 Activo")
-                    else:
-                        st.metric("Estado", "🔴 Inactivo")
-                
-                st.write("**Modelos disponibles:**")
-                for model in info['models']:
-                    if info['configured']:
-                        st.write(f"✅ `{model}`")
-                    else:
-                        st.write(f"⚪ `{model}` (requiere configuración)")
-        
         st.divider()
+        st.subheader("🤖 Modelos de IA por Defecto")
+        models_config = ai_config.get("default_models", {})
+        col1, col2 = st.columns(2)
+        with col1:
+            models_config["openai"] = st.text_input("Modelo OpenAI (Guiones)", value=models_config.get("openai", ""))
+            models_config["gemini"] = st.text_input("Modelo Gemini (Guiones)", value=models_config.get("gemini", ""))
+            models_config["ollama"] = st.text_input("Modelo Ollama (Guiones)", value=models_config.get("ollama", ""))
+        with col2:
+            models_config["image_generation"] = st.text_input("Modelo Generación de Imágenes (Replicate)", value=models_config.get("image_generation", ""))
+            models_config["image_prompt_generation"] = st.text_input("Modelo para Prompts de Imagen (Gemini/OpenAI)", value=models_config.get("image_prompt_generation", ""))
+            models_config["default_voice"] = st.text_input("Voz por Defecto (TTS)", value=models_config.get("default_voice", ""))
         
-        # Configuración de LLM por defecto para optimización
-        st.subheader("🎯 Configuración por Defecto para Optimización YouTube")
-        st.markdown("Configura qué LLM usar por defecto cuando generes contenido optimizado.")
+        ai_config["default_models"] = models_config
+        config["ai"] = ai_config
+
+    # --- Pestaña de Vídeo y Audio ---
+    with tab_video:
+        st.header("Ajustes de Generación de Vídeo y Audio")
+        video_config = config.get("video_generation", {})
+        quality_config = video_config.get("quality", {})
+        audio_config = video_config.get("audio", {})
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📹 Calidad de Vídeo")
+            quality_config["resolution"] = st.selectbox("Resolución", ["1920x1080", "1280x720", "1080x1920"], index=["1920x1080", "1280x720", "1080x1920"].index(quality_config.get("resolution", "1920x1080")))
+            quality_config["fps"] = st.slider("Frames por Segundo (FPS)", 15, 60, quality_config.get("fps", 24))
+            quality_config["bitrate"] = st.text_input("Bitrate de Vídeo", value=quality_config.get("bitrate", "5000k"))
         
-        # Filtrar solo proveedores configurados
-        available_providers = [name for name, info in providers_info.items() if info['configured']]
+        with col2:
+            st.subheader("🔊 Calidad de Audio")
+            quality_config["audio_bitrate"] = st.text_input("Bitrate de Audio", value=quality_config.get("audio_bitrate", "192k"))
+            audio_config["normalize_audio"] = st.checkbox("Normalizar Audio", value=audio_config.get("normalize_audio", True))
+            audio_config["default_music_volume"] = st.slider("Volumen Música de Fondo (por defecto)", 0.0, 1.0, audio_config.get("default_music_volume", 0.08))
+
+        video_config["quality"] = quality_config
+        video_config["audio"] = audio_config
+        config["video_generation"] = video_config
+
+    # --- Pestaña de Subtítulos y Transiciones ---
+    with tab_subtitles:
+        st.header("Ajustes de Subtítulos y Transiciones")
+        video_config = config.get("video_generation", {})
+        subs_config = video_config.get("subtitles", {})
+        trans_config = video_config.get("transitions", {})
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("📝 Subtítulos")
+            subs_config["enable"] = st.checkbox("Habilitar Subtítulos por Defecto", value=subs_config.get("enable", True))
+            subs_config["font"] = st.text_input("Fuente", value=subs_config.get("font", "Arial"))
+            subs_config["font_size"] = st.slider("Tamaño de Fuente", 10, 50, subs_config.get("font_size", 24))
+            subs_config["font_color"] = st.color_picker("Color de Fuente", value=subs_config.get("font_color", "#FFFFFF"))
+            subs_config["stroke_color"] = st.color_picker("Color de Borde", value=subs_config.get("stroke_color", "#000000"))
+            subs_config["stroke_width"] = st.slider("Ancho de Borde", 0.0, 5.0, subs_config.get("stroke_width", 1.5))
+            subs_config["position"] = st.selectbox("Posición", ["bottom", "center", "top"], index=["bottom", "center", "top"].index(subs_config.get("position", "bottom")))
+            subs_config["max_words"] = st.slider("Máximo de Palabras por Línea", 1, 15, subs_config.get("max_words", 7))
+
+        with col2:
+            st.subheader("✨ Transiciones")
+            trans_config["default_type"] = st.selectbox("Tipo de Transición por Defecto", ["dissolve", "fade", "wipe", "slide_in", "none"], index=["dissolve", "fade", "wipe", "slide_in", "none"].index(trans_config.get("default_type", "dissolve")))
+            trans_config["default_duration"] = st.slider("Duración de Transición por Defecto (s)", 0.1, 5.0, trans_config.get("default_duration", 1.0))
+
+        video_config["subtitles"] = subs_config
+        video_config["transitions"] = trans_config
+        config["video_generation"] = video_config
+
+    # --- Pestaña de Rutas ---
+    with tab_paths:
+        st.header("Configuración de Rutas")
+        paths_config = config.get("video_generation", {}).get("paths", {})
+        st.info("Las rutas son relativas al directorio principal del proyecto.")
         
-        if available_providers:
-            col1, col2 = st.columns(2)
-            with col1:
-                default_provider = st.selectbox(
-                    "Proveedor por Defecto",
-                    available_providers,
-                    index=0,
-                    format_func=lambda x: {
-                        'openai': 'OpenAI',
-                        'gemini': 'Google Gemini',
-                        'ollama': 'Ollama (Local)'
-                    }.get(x, x.title()),
-                    help="Este proveedor se usará por defecto en la optimización YouTube"
-                )
-            
-            with col2:
-                if default_provider in providers_info:
-                    available_models = providers_info[default_provider]['models']
-                    default_model = st.selectbox(
-                        "Modelo por Defecto",
-                        available_models,
-                        help=f"Modelo de {default_provider.title()} a usar por defecto"
-                    )
-            
-            st.info(f"💡 **Configuración actual:** {default_provider.upper()}/{default_model}")
-            st.caption("Esta configuración se puede cambiar individualmente en cada generación de video.")
-        else:
-            st.warning("⚠️ No hay proveedores de IA configurados. Configura al menos uno (OpenAI, Gemini o Ollama) para usar la optimización YouTube.")
-    
-    # ... existing code for other tabs ...
+        paths_config["projects_dir"] = st.text_input("Directorio de Proyectos", value=paths_config.get("projects_dir", "projects"))
+        paths_config["output_dir"] = st.text_input("Directorio de Salida (Videos Finales)", value=paths_config.get("output_dir", "output"))
+        paths_config["assets_dir"] = st.text_input("Directorio de Assets (Overlays, etc.)", value=paths_config.get("assets_dir", "overlays"))
+        paths_config["background_music_dir"] = st.text_input("Directorio de Música de Fondo", value=paths_config.get("background_music_dir", "background_music"))
+        
+        config["video_generation"]["paths"] = paths_config
+
+    # --- Botón de Guardado --- 
+    st.divider()
+    if st.button("💾 Guardar Toda la Configuración", type="primary", use_container_width=True):
+        if save_config(config):
+            # Opcional: forzar un rerun para que toda la app recargue la nueva config
+            st.rerun()
+
+# Para poder llamar a esta página desde app.py
+if __name__ == "__main__":
+    show_settings_page()
