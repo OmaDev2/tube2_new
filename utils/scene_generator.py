@@ -19,7 +19,6 @@ except ImportError:
         def generate_content(self, *args, **kwargs):
             return "[ERROR] AIServices no disponible."
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # --- NUEVA CONSTANTE ---
@@ -171,53 +170,85 @@ class SceneGenerator:
         paragraphs = re.split(r'\n\s*\n', script_text)
         return [p.strip() for p in paragraphs if p.strip()]
 
-    def _align_paragraphs_to_transcription(self, paragraphs: List[str], transcription_segments: List[Dict]) -> List[Dict]:
-        """Alinea los párrafos del guión con los timestamps de la transcripción."""
+    def _create_semantic_scenes(self, transcription_segments: List[Dict], target_duration: float = 12.0) -> List[Dict]:
+        """
+        Crea escenas semánticamente coherentes basadas en la transcripción.
+        Agrupa segmentos por frases completas y duración objetivo.
+        """
+        if not transcription_segments:
+            return []
+        
         scenes = []
-        full_transcript_text = " ".join([seg['text'].strip() for seg in transcription_segments])
-        last_found_pos = 0
-
-        for i, paragraph in enumerate(paragraphs):
-            # Buscar el inicio del párrafo en la transcripción
-            # Usamos las primeras ~10 palabras para una búsqueda más fiable
-            search_text = " ".join(paragraph.split()[:10])
-            start_char_pos = full_transcript_text.find(search_text, last_found_pos)
-
-            if start_char_pos == -1:
-                logger.warning(f"No se pudo alinear el párrafo {i + 1}. Omitiendo.")
-                continue
-
-            end_char_pos = start_char_pos + len(paragraph)
-            last_found_pos = end_char_pos # Actualizar para la siguiente búsqueda
-
-            # Encontrar los tiempos de inicio y fin para este rango de caracteres
-            scene_start_time, scene_end_time = -1, -1
-            current_char_count = 0
-            for seg in transcription_segments:
-                seg_len = len(seg['text'].strip()) + 1
-                if current_char_count >= start_char_pos and scene_start_time == -1:
-                    scene_start_time = seg['start']
-                if current_char_count >= end_char_pos and scene_start_time != -1:
-                    scene_end_time = seg['end']
-                    break
-                current_char_count += seg_len
+        current_scene_text = []
+        current_scene_start = transcription_segments[0]['start']
+        current_scene_duration = 0.0
+        
+        logger.info(f"Creando escenas semánticas con duración objetivo: {target_duration:.1f}s")
+        
+        for i, segment in enumerate(transcription_segments):
+            segment_text = segment['text'].strip()
+            segment_duration = segment['end'] - segment['start']
             
-            # Si el bucle termina, el tiempo final es el del último segmento
-            if scene_end_time == -1 and scene_start_time != -1:
-                scene_end_time = transcription_segments[-1]['end']
-
-            if scene_start_time != -1 and scene_end_time > scene_start_time:
-                scenes.append({
-                    "index": len(scenes),
-                    "text": paragraph,
-                    "start": scene_start_time,
-                    "end": scene_end_time,
-                    "duration": scene_end_time - scene_start_time
-                })
+            # Agregar segmento a la escena actual
+            current_scene_text.append(segment_text)
+            current_scene_duration += segment_duration
+            
+            # Determinar si es un buen momento para terminar la escena
+            is_sentence_end = segment_text.endswith(('.', '!', '?', ':', ';'))
+            is_long_enough = current_scene_duration >= target_duration * 0.8  # Al menos 80% del objetivo
+            is_too_long = current_scene_duration >= target_duration * 1.5     # Máximo 150% del objetivo
+            is_last_segment = i == len(transcription_segments) - 1
+            
+            # Finalizar escena si se cumple alguna condición
+            if (is_sentence_end and is_long_enough) or is_too_long or is_last_segment:
+                scene_text = " ".join(current_scene_text).strip()
+                scene_end = segment['end']
+                
+                if scene_text:  # Solo agregar si hay texto
+                    scenes.append({
+                        "index": len(scenes),
+                        "text": scene_text,
+                        "start": current_scene_start,
+                        "end": scene_end,
+                        "duration": current_scene_duration
+                    })
+                    
+                    logger.info(f"Escena {len(scenes)-1}: {current_scene_start:.1f}s-{scene_end:.1f}s ({current_scene_duration:.1f}s) - {scene_text[:50]}...")
+                
+                # Iniciar nueva escena (si no es el último segmento)
+                if not is_last_segment:
+                    current_scene_text = []
+                    current_scene_start = segment['end']
+                    current_scene_duration = 0.0
+        
+        logger.info(f"Creadas {len(scenes)} escenas semánticas que cubren desde {scenes[0]['start']:.1f}s hasta {scenes[-1]['end']:.1f}s")
         return scenes
+
+    def _align_paragraphs_to_transcription(self, paragraphs: List[str], transcription_segments: List[Dict]) -> List[Dict]:
+        """
+        NUEVO: Usa segmentación semántica en lugar de alineación compleja con fuzzywuzzy.
+        Esto es más confiable y siempre produce escenas sincronizadas.
+        """
+        logger.info("Usando segmentación semántica inteligente (sin fuzzywuzzy)")
+        
+        # Calcular duración objetivo basada en el número de párrafos
+        if not transcription_segments:
+            return []
+        
+        total_duration = transcription_segments[-1]['end'] - transcription_segments[0]['start']
+        num_paragraphs = len([p for p in paragraphs if p.strip()])
+        target_duration = total_duration / max(num_paragraphs, 1) if num_paragraphs > 0 else 12.0
+        
+        # Ajustar duración objetivo para que sea razonable (8-15 segundos)
+        target_duration = max(8.0, min(target_duration, 15.0))
+        
+        logger.info(f"Duración objetivo por escena: {target_duration:.1f}s (total: {total_duration:.1f}s, párrafos: {num_paragraphs})")
+        
+        # Crear escenas semánticas
+        return self._create_semantic_scenes(transcription_segments, target_duration)
     
-    def generate_scenes_from_script(self, script_content: str, transcription_segments: List[Dict], mode: str) -> List[Dict]:
-        """Genera escenas con el nuevo modo híbrido por párrafos."""
+    def generate_scenes_from_script(self, script_content: str, transcription_segments: List[Dict], mode: str, project_info: Dict, image_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
+        """Genera escenas con el nuevo modo híbrido por párrafos y una subdivisión robusta."""
         logger.info(f"Generando escenas con modo: '{mode}'...")
         
         if mode == "Por Párrafos (Híbrido)":
@@ -225,41 +256,76 @@ class SceneGenerator:
             paragraphs = self._segment_script_by_paragraphs(script_content)
             timed_scenes = self._align_paragraphs_to_transcription(paragraphs, transcription_segments)
             
-            final_scenes = []
+            final_scenes_base = []
             for scene in timed_scenes:
+                # --- INICIO DE LA LÓGICA CORREGIDA ---
                 if scene['duration'] > MAX_SCENE_DURATION:
-                    logger.info(f"Escena {scene['index']} es muy larga ({scene['duration']:.1f}s > {MAX_SCENE_DURATION}s). Subdividiendo.")
-                    num_sub_scenes = round(scene['duration'] / (MAX_SCENE_DURATION - 5)) # Apuntar a escenas de ~20s
-                    if num_sub_scenes < 2: num_sub_scenes = 2
-                    
-                    sub_scene_duration = scene['duration'] / num_sub_scenes
-                    
-                    for j in range(num_sub_scenes):
-                        sub_start_time = scene['start'] + (j * sub_scene_duration)
-                        sub_end_time = sub_start_time + sub_scene_duration
-                        
-                        sub_text_parts = []
-                        for seg in transcription_segments:
-                            if seg['start'] >= sub_start_time and seg['end'] <= sub_end_time:
-                                sub_text_parts.append(seg['text'].strip())
-                        
-                        if not sub_text_parts: continue
-                        
-                        final_scenes.append({
-                            "index": len(final_scenes),
-                            "text": " ".join(sub_text_parts),
+                    logger.info(f"Escena {scene['index']} es muy larga ({scene['duration']:.1f}s > {MAX_SCENE_DURATION}s). Subdividiendo de forma robusta.")
+
+                    # 1. Encontrar todos los segmentos de la transcripción que pertenecen a esta escena larga.
+                    # Se usa una lógica de solapamiento para no perder ningún segmento.
+                    scene_segments = [
+                        seg for seg in transcription_segments
+                        if seg['start'] < scene['end'] and seg['end'] > scene['start']
+                    ]
+
+                    if not scene_segments:
+                        logger.warning(f"No se encontraron segmentos para la escena larga {scene['index']}, no se puede subdividir. Se usará como está.")
+                        scene_copy = scene.copy()
+                        scene_copy["index"] = len(final_scenes_base)
+                        final_scenes_base.append(scene_copy)
+                        continue
+
+                    # 2. Determinar en cuántas sub-escenas dividir.
+                    # Se apunta a una duración ideal un poco menor que el máximo.
+                    target_sub_duration = MAX_SCENE_DURATION * 0.9
+                    num_sub_scenes = max(2, round(scene['duration'] / target_sub_duration))
+
+                    # 3. Dividir la *lista de segmentos* en N grupos.
+                    # Esto garantiza que todos los segmentos se distribuyen.
+                    k, m = divmod(len(scene_segments), num_sub_scenes)
+                    segment_groups = [scene_segments[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(num_sub_scenes)]
+
+                    # 4. Crear sub-escenas a partir de los grupos de segmentos.
+                    for group in segment_groups:
+                        if not group:
+                            continue
+
+                        # El texto, inicio y fin se derivan directamente de los segmentos del grupo.
+                        sub_scene_text = " ".join(s['text'].strip() for s in group)
+                        sub_start_time = group[0]['start']
+                        sub_end_time = group[-1]['end']
+                        sub_duration = sub_end_time - sub_start_time
+
+                        if sub_duration <= 0:
+                            continue
+
+                        final_scenes_base.append({
+                            "index": len(final_scenes_base),
+                            "text": sub_scene_text,
                             "start": sub_start_time,
                             "end": sub_end_time,
-                            "duration": sub_end_time - sub_start_time
+                            "duration": sub_duration
                         })
+                # --- FIN DE LA LÓGICA CORREGIDA ---
                 else:
-                    final_scenes.append(scene)
+                    # La escena no es demasiado larga, se añade directamente.
+                    scene_copy = scene.copy()
+                    scene_copy["index"] = len(final_scenes_base)
+                    final_scenes_base.append(scene_copy)
             
-            logger.info(f"Segmentación por párrafos resultó en {len(final_scenes)} escenas finales.")
-            return final_scenes
+            logger.info(f"Segmentación por párrafos resultó en {len(final_scenes_base)} escenas base.")
+            
+            # Generar prompts para estas escenas finales.
+            final_scenes_with_prompts = self.generate_prompts_for_scenes(
+                final_scenes_base, project_info, image_prompt_config, ai_service
+            )
+            logger.info(f"Se generaron prompts para {len(final_scenes_with_prompts)} escenas.")
+
+            return final_scenes_with_prompts
         
         else:
-            # Fallback a métodos anteriores
+            # Fallback a métodos anteriores (sin cambios)
             return self._generate_scenes_legacy(script_content, transcription_segments, mode)
 
     def _generate_scenes_legacy(self, script_content: str, transcription_segments: List[Dict], mode: str) -> List[Dict]:
@@ -295,8 +361,21 @@ class SceneGenerator:
 
     def generate_prompts_for_scenes(self, scenes: List[Dict], project_info: Dict, image_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
         """Genera prompts para las escenas con sistema de fallback robusto."""
+        
+        # VERIFICACIÓN CRÍTICA DEL AI_SERVICE
+        if not ai_service:
+            logger.error("🚨 ai_service es None! No se pueden generar prompts de imagen.")
+            for scene in scenes:
+                scene['image_prompt'] = f"[ERROR] AIServices no disponible. Prompt básico: {scene.get('text', '')[:350]}"
+            return scenes
+        
         prompt_obj = image_prompt_config.get('prompt_obj')
         provider_priority_list = image_prompt_config.get('img_prompt_providers_priority', ['gemini'])
+        
+        logger.info(f"🔍 DEBUG - Configuración recibida:")
+        logger.info(f"  - prompt_obj: {prompt_obj.get('nombre', 'Sin nombre') if prompt_obj else 'None'}")
+        logger.info(f"  - provider_priority_list: {provider_priority_list}")
+        logger.info(f"  - ai_service disponible: {ai_service is not None}")
         
         if not prompt_obj:
             logger.warning("No se proporcionó plantilla de prompt. Usando fallback simple.")
@@ -308,13 +387,38 @@ class SceneGenerator:
         user_prompt_template = prompt_obj.get("user_prompt", "Generate an image for: {scene_text}")
 
         for i, scene in enumerate(scenes):
-            user_prompt = user_prompt_template.format(
-                scene_text=scene['text'], 
-                titulo=project_info.get("titulo", ""), 
-                contexto=project_info.get("contexto", "")
-            )
+            # Preparar todas las variables disponibles para el template
+            template_variables = {
+                'scene_text': scene['text'],
+                'titulo': project_info.get("titulo", ""),
+                'contexto': project_info.get("contexto", ""),
+                'style': image_prompt_config.get('style', '')  # Variable de estilo
+            }
+            
+            # Obtener las variables requeridas por la plantilla
+            template_vars_required = prompt_obj.get('variables', [])
+            
+            # Filtrar solo las variables que realmente necesita la plantilla
+            filtered_variables = {
+                var: template_variables.get(var, '') 
+                for var in template_vars_required 
+                if var in template_variables
+            }
+            
+            try:
+                user_prompt = user_prompt_template.format(**filtered_variables)
+            except KeyError as e:
+                logger.warning(f"[Escena {i+1}] Variable faltante en template: {e}. Usando template básico.")
+                user_prompt = f"Generate an image for: {scene['text']}"
             
             generated_prompt = None
+            
+            # LOGGING DETALLADO PARA DEBUG
+            logger.info(f"[Escena {i+1}] 🔍 DEBUG - Iniciando generación de prompt")
+            logger.info(f"[Escena {i+1}] 🔍 DEBUG - Proveedores disponibles: {provider_priority_list}")
+            logger.info(f"[Escena {i+1}] 🔍 DEBUG - Variables filtradas: {filtered_variables}")
+            logger.info(f"[Escena {i+1}] 🔍 DEBUG - User prompt generado: {user_prompt[:200]}...")
+            
             for provider in provider_priority_list:
                 try:
                     logger.info(f"[Escena {i+1}] Intentando generar prompt con: {provider.upper()}")
@@ -332,6 +436,9 @@ class SceneGenerator:
                         }
                         model = model_map.get(provider, 'default')
                     
+                    logger.info(f"[Escena {i+1}] 🔍 DEBUG - Usando modelo: {model}")
+                    logger.info(f"[Escena {i+1}] 🔍 DEBUG - Llamando ai_service.generate_content...")
+                    
                     generated_text = ai_service.generate_content(
                         provider=provider, 
                         model=model, 
@@ -339,20 +446,23 @@ class SceneGenerator:
                         user_prompt=user_prompt
                     )
                     
+                    logger.info(f"[Escena {i+1}] 🔍 DEBUG - Respuesta recibida: {type(generated_text)} - {str(generated_text)[:100] if generated_text else 'None'}...")
+                    
                     if generated_text and "[ERROR]" not in generated_text:
-                        logger.info(f"[Escena {i+1}] ✅ Éxito con {provider.upper()}.")
+                        logger.info(f"[Escena {i+1}] ✅ Éxito con {provider.upper()}. Texto generado: {generated_text[:100]}...")
                         generated_prompt = generated_text.strip()
                         break
                     else:
-                        logger.warning(f"[Escena {i+1}] ⚠️ Fallo leve con {provider.upper()}. Intentando siguiente proveedor.")
+                        logger.warning(f"[Escena {i+1}] ⚠️ Fallo leve con {provider.upper()}. Texto generado (o vacío): {generated_text}. Intentando siguiente proveedor.")
                 except Exception as e:
                     logger.error(f"[Escena {i+1}] ❌ Fallo grave con {provider.upper()}: {e}. Intentando siguiente proveedor.")
             
             if not generated_prompt:
-                logger.error(f"[Escena {i+1}] 🚨 Todos los proveedores fallaron. Usando prompt de emergencia.")
+                logger.error(f"[Escena {i+1}] 🚨 Todos los proveedores fallaron. Usando prompt de emergencia. Texto de escena: {scene['text'][:100]}...")
                 scene['image_prompt'] = f"Photorealistic, cinematic, high detail: {scene['text'][:350]}"
             else:
                 scene['image_prompt'] = generated_prompt
+            logger.info(f"[Escena {i+1}] Prompt final asignado: {scene['image_prompt'][:100]}...")
         
         return scenes
 
