@@ -40,7 +40,6 @@ except ImportError as e:
 # --- Fin Importaciones ---
 
 # Configuración logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class VideoProcessor:
@@ -251,11 +250,35 @@ class VideoProcessor:
             img_prompt_config = {
                 "img_prompt_provider": image_config_ui.get("img_prompt_provider"),
                 "img_prompt_model": image_config_ui.get("img_prompt_model"),
-                "prompt_obj": image_config_ui.get("prompt_obj") # Este es el objeto con 'system_prompt' y 'user_prompt'
+                "prompt_obj": image_config_ui.get("prompt_obj"), # Este es el objeto con 'system_prompt' y 'user_prompt'
+                "style": image_config_ui.get("style", ""), # ¡AÑADIR LA VARIABLE STYLE!
+                # También pasar configuraciones de modelos que podrían ser necesarias
+                "img_prompt_providers_priority": [image_config_ui.get("img_prompt_provider", "gemini")],
+                "img_prompt_models": {
+                    image_config_ui.get("img_prompt_provider", "gemini"): image_config_ui.get("img_prompt_model")
+                }
             }
+            
+            # Logging para debug
+            logger.info(f"[{project_id}] Configuración de prompts de imagen: {img_prompt_config}")
             
             scenes_data = []
             project_info['scene_generation_mode'] = segmentation_mode # Guardar para referencia
+
+            if segmentation_mode == "Por Párrafos (Híbrido)":
+                if not script_content or not segments:
+                    logger.warning(f"[{project_id}] Modo 'Por Párrafos' seleccionado pero falta guion o transcripción. Revirtiendo a 'Por Duración'.")
+                    segmentation_mode = "Por Duración (Basado en Audio)" # Revertir a la siguiente mejor opción
+                    project_info['scene_generation_mode'] = segmentation_mode
+                else:
+                    scenes_data = self.scene_generator.generate_scenes_from_script(
+                        script_content, 
+                        segments, 
+                        mode="Por Párrafos (Híbrido)",
+                        project_info=project_info,
+                        image_prompt_config=img_prompt_config,
+                        ai_service=self.ai_service
+                    )
             
             if segmentation_mode == "Por Duración (Basado en Audio)":
                  if not segments:
@@ -279,24 +302,38 @@ class VideoProcessor:
                       
                       scenes_data = self.scene_generator.generate_prompts_for_timed_scenes(
                            segments, target_duration, project_info, img_prompt_config, self.ai_service)
-            else: 
+            
+            if not scenes_data: # Si los modos anteriores fallaron o se seleccionó el modo texto
                  project_info['scene_generation_mode'] = "Automático (Texto)" # Asegurar que esté puesto
                  scenes_data = self.scene_generator.generate_scenes_and_prompts_from_text(
                       script_content, project_info, img_prompt_config, self.ai_service)
 
-            if not scenes_data: 
+            if not scenes_data:
                 logger.error(f"[{project_id}] No se pudieron generar datos de escenas con modo: {project_info['scene_generation_mode']}.")
                 raise RuntimeError("Fallo crítico: No se pudieron generar datos de escenas.")
 
+            # --- VERIFICACIÓN CRÍTICA ---
+            # Comprobar si los prompts de imagen se generaron correctamente
+            if not all(s.get('image_prompt') and '[PROMPT FALTANTE]' not in s.get('image_prompt') for s in scenes_data):
+                logger.error(f"[{project_id}] Error crítico: La generación de prompts de imagen falló. Algunas escenas no tienen un prompt válido.")
+                # Opcional: Guardar las escenas para depuración incluso si fallaron los prompts
+                try:
+                    scenes_path_debug = base_path / "scenes_failed_prompts.json"
+                    self.scene_generator.save_scenes(scenes_data, str(scenes_path_debug), project_info)
+                    logger.info(f"[{project_id}] Datos de escenas con fallos guardados en: {scenes_path_debug}")
+                except Exception as save_err:
+                    logger.error(f"[{project_id}] No se pudieron guardar las escenas de depuración: {save_err}")
+                
+                raise RuntimeError("La generación de prompts de imagen falló. Revisa la configuración y el proveedor de IA.")
+
             scenes_path = base_path / "scenes.json"
-            # Usar el método save_scenes del scene_generator
             try:
-                 self.scene_generator.save_scenes(scenes_data, str(scenes_path), project_info)
-                 project_info["scenes_path"] = str(scenes_path)
-                 logger.info(f"[{project_id}] Datos de {len(scenes_data)} escenas guardados en {scenes_path}")
+                self.scene_generator.save_scenes(scenes_data, str(scenes_path), project_info)
+                project_info["scenes_path"] = str(scenes_path)
+                logger.info(f"[{project_id}] Datos de {len(scenes_data)} escenas guardados en {scenes_path}")
             except Exception as save_e:
-                 logger.error(f"[{project_id}] Error guardando scenes.json via scene_generator: {save_e}", exc_info=True)
-                 project_info["scenes_path"] = None # Marcar como no guardado
+                logger.error(f"[{project_id}] Error guardando scenes.json via scene_generator: {save_e}", exc_info=True)
+                project_info["scenes_path"] = None
 
             # --- AÑADIR ESTA LÍNEA DE DEBUG ---
             logger.info(f"[{project_id}] Número de escenas generadas: {len(scenes_data)}")
@@ -400,91 +437,118 @@ class VideoProcessor:
             logger.info(f"[{project_id}] Ensamblando video base con sincronización de audio...")
             video_config_ui = full_config.get("video", {})
             
-            # NUEVA LÓGICA: Usar timestamps de transcripción para sincronizar
+            # --- INICIO DEL CÓDIGO CORREGIDO ---
             scene_durations = []
             num_images = len(project_info["image_paths"])
-            
-            if segments and len(segments) > 0:
-                logger.info(f"[{project_id}] Usando transcripción para sincronizar video ({len(segments)} segmentos de audio)")
+            # Usar la duración total del audio para el cálculo final
+            total_audio_duration = project_info.get('audio_duration', 0)
+
+            # **MÉTODO 1: El ideal. Calcular duraciones usando los 'start' de las escenas para incluir silencios.**
+            if scenes_data and all(s.get('start') is not None for s in scenes_data) and len(scenes_data) == num_images and total_audio_duration > 0:
+                logger.info(f"[{project_id}] Calculando duraciones de escena para sincronizar con audio (incluyendo silencios).")
                 
-                # Obtener configuración de efectos que afectan la duración
-                fade_out_duration = video_config_ui.get('fade_out', 0)
-                transition_duration = video_config_ui.get('transition_duration', 1.0)
+                # Ordenar las escenas por tiempo de inicio para asegurar el cálculo correcto
+                scenes_data.sort(key=lambda s: s['start'])
                 
-                # Calcular duración total del audio
-                total_audio_duration = segments[-1]['end'] if segments else project_info.get('audio_duration', 0)
-                
-                # Distribuir los segmentos de audio entre las imágenes disponibles
-                if num_images > 0:
-                    segments_per_image = len(segments) // num_images
-                    remaining_segments = len(segments) % num_images
+                for i, scene in enumerate(scenes_data):
+                    current_scene_start = scene['start']
                     
-                    current_segment_idx = 0
-                    for img_idx in range(num_images):
-                        # Calcular cuántos segmentos corresponden a esta imagen
-                        segments_for_this_image = segments_per_image
-                        if img_idx < remaining_segments:
-                            segments_for_this_image += 1
-                        
-                        # Calcular duración basada en los segmentos asignados
-                        if segments_for_this_image > 0:
-                            start_time = segments[current_segment_idx]['start']
-                            end_segment_idx = current_segment_idx + segments_for_this_image - 1
-                            end_time = segments[end_segment_idx]['end']
-                            duration = end_time - start_time
-                            scene_durations.append(duration)
-                            current_segment_idx += segments_for_this_image
-                        else:
-                            # Fallback si no hay segmentos para esta imagen
-                            scene_durations.append(5.0)
+                    if i < len(scenes_data) - 1:
+                        # La duración de esta escena es el tiempo desde que empieza hasta que empieza la siguiente.
+                        next_scene_start = scenes_data[i+1]['start']
+                        duration = next_scene_start - current_scene_start
+                    else:
+                        # Es la última escena, su duración se extiende hasta el final del audio.
+                        duration = total_audio_duration - current_scene_start
                     
-                    # MEJORA: Añadir 1 segundo extra al final para evitar terminación abrupta
+                    # Comprobación de seguridad para evitar duraciones negativas o cero
+                    if duration <= 0.1: # Usar un umbral pequeño
+                        logger.warning(f"[{project_id}] Duración calculada no positiva ({duration:.2f}s) para escena {i}. Usando fallback de 2 segundos.")
+                        duration = 2.0
+                    
+                    scene_durations.append(duration)
+                
+                # Opcional: añadir un poco de tiempo extra al final si se desea (yo lo quitaría para una sincronización perfecta)
+                # if scene_durations:
+                #     scene_durations[-1] += 1.0
+
+                logger.info(f"[{project_id}] Duraciones por escena calculadas para sincronización: {[f'{d:.2f}s' for d in scene_durations]}")
+                total_video_duration = sum(scene_durations)
+                logger.info(f"[{project_id}] Duración total del video calculada: {total_video_duration:.2f}s. Duración del audio: {total_audio_duration:.2f}s.")
+                
+                # Si la diferencia es notable, se ajusta la última escena para cuadrar perfectamente
+                if abs(total_video_duration - total_audio_duration) > 0.1:
+                    diff = total_audio_duration - total_video_duration
+                    scene_durations[-1] += diff
+                    logger.info(f"[{project_id}] Ajustando duración de la última escena en {diff:.2f}s para una sincronización perfecta.")
+
+                # --- INICIO DEL NUEVO BLOQUE DE CÓDIGO DE COMPENSACIÓN DE TRANSICIONES ---
+                # Ahora, pre-compensamos la duración que se perderá por las transiciones.
+                transition_duration = video_config_ui.get('transition_duration', 0)
+                transition_type = video_config_ui.get('transition_type', 'none')
+
+                # Solo aplicar compensación si la transición es de tipo fundido/disolución
+                is_crossfade_transition = transition_type.lower() in ['dissolve', 'fade']
+
+                if num_images > 1 and transition_duration > 0 and is_crossfade_transition:
+                    time_lost_to_transitions = (num_images - 1) * transition_duration
+                    logger.info(f"[{project_id}] Compensando {time_lost_to_transitions:.2f}s que se perderán por {num_images - 1} transiciones de '{transition_type}'.")
+                    
+                    # Creamos una copia para no modificar la original mientras iteramos
+                    compensated_durations = list(scene_durations)
+                    # Añadimos la duración de la transición a cada clip EXCEPTO el último,
+                    # ya que el último no tiene una transición de salida que le acorte.
+                    for i in range(len(compensated_durations) - 1):
+                        compensated_durations[i] += transition_duration
+                    
+                    # La duración total de los clips fuente ahora debería ser correcta para que, 
+                    # DESPUÉS de aplicar las transiciones, el vídeo final tenga la duración del audio.
+                    original_total = sum(scene_durations)
+                    compensated_total = sum(compensated_durations)
+                    logger.info(f"[{project_id}] La suma de duraciones original era {original_total:.2f}s. La suma compensada es {compensated_total:.2f}s.")
+                    
+                    # Usamos las duraciones compensadas para crear el vídeo.
+                    scene_durations = compensated_durations
+                # --- FIN DEL NUEVO BLOQUE DE CÓDIGO DE COMPENSACIÓN DE TRANSICIONES ---
+
+            # **MÉTODO 2: Fallback (el resto del código se mantiene igual)**
+            elif segments and len(segments) > 0:
+                logger.warning(f"[{project_id}] No se pudieron usar los timestamps de las escenas. Usando distribución uniforme basada en duración total del audio.")
+                
+                # La lógica de fallback existente...
+                if num_images > 0 and total_audio_duration > 0:
+                    duration_per_image = total_audio_duration / num_images
+                    scene_durations = [duration_per_image] * num_images
+                    
                     if scene_durations:
-                        scene_durations[-1] += 1.0  # Añadir 1 segundo a la última imagen
+                        scene_durations[-1] += 1.0
                         logger.info(f"[{project_id}] Añadido 1 segundo extra a la última imagen para suavizar el final")
                     
-                    # CORRECCIÓN: Ajustar duraciones para compensar efectos
-                    # El video debe durar lo suficiente para que no haya fade out antes del final del audio
-                    total_scene_duration = sum(scene_durations)
-                    num_transitions = max(0, len(scene_durations) - 1)
-                    effective_video_duration = total_scene_duration - (num_transitions * transition_duration)
-                    
-                    # Si el fade out hace que el video termine antes que el audio, extender las escenas
-                    if fade_out_duration > 0 and effective_video_duration < total_audio_duration:
-                        logger.warning(f"[{project_id}] Ajustando duraciones para evitar fade out prematuro")
-                        logger.info(f"[{project_id}] Audio: {total_audio_duration:.2f}s, Video efectivo: {effective_video_duration:.2f}s, Fade out: {fade_out_duration}s")
-                        
-                        # Necesitamos que: effective_duration >= total_audio_duration
-                        # Por tanto: total_scene_duration >= total_audio_duration + transitions
-                        required_total_scene_duration = total_audio_duration + (num_transitions * transition_duration)
-                        scale_factor = required_total_scene_duration / total_scene_duration
-                        
-                        scene_durations = [d * scale_factor for d in scene_durations]
-                        logger.info(f"[{project_id}] Duraciones escaladas por factor {scale_factor:.3f}")
-                    
-                    logger.info(f"[{project_id}] Duraciones sincronizadas con transcripción: {[f'{d:.2f}s' for d in scene_durations]}")
-                    logger.info(f"[{project_id}] Duración total del video: {sum(scene_durations):.2f}s")
-                    logger.info(f"[{project_id}] Duración efectiva (después de transiciones): {sum(scene_durations) - (num_transitions * transition_duration):.2f}s")
+                    logger.info(f"[{project_id}] Distribución uniforme: {duration_per_image:.2f}s por imagen")
                 else:
-                    raise ValueError("No hay imágenes para sincronizar con la transcripción")
+                    raise ValueError("No hay imágenes o duración de audio para sincronizar")
+            # --- FIN DEL CÓDIGO CORREGIDO ---
+            
+            # **MÉTODO 3: Último fallback**
             else:
                 logger.warning(f"[{project_id}] No hay segmentos de transcripción, usando duraciones de fallback")
-                # Fallback: usar duración uniforme basada en el audio total
+                
+                # Intentar usar duración del audio del project_info
                 audio_duration = project_info.get('audio_duration', 0)
                 if audio_duration > 0 and num_images > 0:
                     duration_per_image = audio_duration / num_images
                     scene_durations = [duration_per_image] * num_images
-                    logger.info(f"[{project_id}] Duraciones uniformes de fallback: {duration_per_image:.2f}s por imagen")
+                    logger.info(f"[{project_id}] Fallback: distribución uniforme {duration_per_image:.2f}s por imagen (total: {audio_duration:.2f}s)")
                 else:
                     # Último fallback: duración fija
                     default_duration = video_config_ui.get('duration_per_image_manual', 10.0)
                     scene_durations = [default_duration] * num_images
-                    logger.warning(f"[{project_id}] Usando duración fija de {default_duration}s por imagen")
+                    logger.warning(f"[{project_id}] Último fallback: duración fija de {default_duration}s por imagen")
                 
-                # MEJORA: Añadir 1 segundo extra al final también en fallback
+                # Añadir 1 segundo extra al final
                 if scene_durations:
-                    scene_durations[-1] += 1.0  # Añadir 1 segundo a la última imagen
-                    logger.info(f"[{project_id}] Añadido 1 segundo extra a la última imagen (fallback) para suavizar el final")
+                    scene_durations[-1] += 1.0
+                    logger.info(f"[{project_id}] Añadido 1 segundo extra a la última imagen para suavizar el final")
             
             if not scene_durations:
                 raise ValueError("No se pudieron determinar duraciones para las escenas")
@@ -527,8 +591,10 @@ class VideoProcessor:
             final_video_clip = self._apply_audio(final_video_clip, project_info, audio_config_ui)
             project_info["status"] = "post_audio_ok"; self._save_project_info(base_path, project_info)
             
-            logger.info(f"[{project_id}] Aplicando efectos/overlays...")
-            final_video_clip = self._apply_effects_overlays(final_video_clip, project_info, video_config_ui)
+            logger.info(f"[{project_id}] Aplicando efectos/overlays finales...")
+            # NOTA: Los overlays YA están aplicados en el video base por clip individual
+            # Solo aplicar efectos globales (fade in/out) aquí, NO overlays
+            final_video_clip = self._apply_effects_overlays(final_video_clip, project_info, video_config_ui, skip_overlays=True)
             project_info["status"] = "post_effects_ok"; self._save_project_info(base_path, project_info)
 
             # --- Subtitles --- 
@@ -834,20 +900,25 @@ class VideoProcessor:
             logger.error(f"[{project_id}] Error crítico en _apply_audio: {e}", exc_info=True)
             return video_clip
 
-    def _apply_effects_overlays(self, video_clip: CompositeVideoClip, project_info: Dict, video_config_ui: Dict) -> CompositeVideoClip:
+    def _apply_effects_overlays(self, video_clip: CompositeVideoClip, project_info: Dict, video_config_ui: Dict, skip_overlays: bool = False) -> CompositeVideoClip:
         project_id = project_info.get('id', 'EFFECTS')
         logger.info(f"[{project_id}] Aplicando efectos/overlays...") 
         final_clip = video_clip
         opened_overlays = [] 
         
         overlays_ui = video_config_ui.get('overlays', [])
-        if overlays_ui:
+        if overlays_ui and not skip_overlays:
              overlays_config_void = self.video_gen_config.get('effects', {}).get('overlays', [])
              overlay_map = {Path(o['name']).name: o for o in overlays_config_void if isinstance(o, dict) and 'name' in o}
              logger.info(f"[{project_id}] Overlays UI: {overlays_ui}")
              logger.debug(f"[{project_id}] Overlays config: {overlay_map}")
-             clips_for_composition = [final_clip] 
+             clips_for_composition = [final_clip]
+        elif overlays_ui and skip_overlays:
+             logger.info(f"[{project_id}] Overlays detectados pero SALTADOS (ya aplicados en video base): {len(overlays_ui)} overlay(s)")
+        else:
+             logger.info(f"[{project_id}] No hay overlays configurados.") 
 
+        if overlays_ui and not skip_overlays:
              for overlay_ui_info in overlays_ui:
                  # overlay_ui_info es una tupla: (nombre, opacidad, tiempo_inicio, duración)
                  if isinstance(overlay_ui_info, tuple) and len(overlay_ui_info) >= 2:
@@ -922,7 +993,6 @@ class VideoProcessor:
              
              for ov_clip in opened_overlays: 
                  try: ov_clip.close() 
-                 
                  except: pass
 
         # --- Los efectos se aplican por clip individual durante la creación del video base ---
