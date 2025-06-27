@@ -270,6 +270,125 @@ def show_batch_processor():
                 default_img_index = prompt_img_names.index(default_img_prompt_name) if default_img_prompt_name in prompt_img_names else 0
                 selected_prompt_img_name = st.selectbox("Plantilla de Imágenes", prompt_img_names, index=default_img_index, key="batch_image_prompt")
                 img_prompt_obj = next((p for p in prompts_img_list if p.get("nombre") == selected_prompt_img_name), None)
+                
+                # 🏛️ CONFIGURACIÓN ESPECIAL PARA PROMPT HISTÓRICO
+                if selected_prompt_img_name == "Escenas Fotorrealistas Históricamente Precisas":
+                    st.markdown("---")
+                    st.subheader("🏛️ Configuración Histórica")
+                    st.info("💡 Este prompt requiere información histórica específica para generar imágenes precisas")
+                    
+                    # Opción de configuración
+                    config_mode = st.radio(
+                        "¿Cómo quieres configurar el contexto histórico?",
+                        ["🤖 Generar automáticamente con IA", "✍️ Configurar manualmente"],
+                        key="batch_historical_config_mode",
+                        help="IA analizará el título/contexto para extraer información histórica, o puedes configurarla manualmente"
+                    )
+                    
+                    if config_mode == "✍️ Configurar manualmente":
+                        col_hist1, col_hist2 = st.columns(2)
+                        with col_hist1:
+                            periodo_historico = st.text_input(
+                                "📅 Período Histórico",
+                                placeholder="Ej: Siglo IV d.C., Imperio Romano tardío",
+                                key="batch_periodo_historico",
+                                help="Especifica la época exacta con fechas aproximadas"
+                            )
+                            ubicacion = st.text_input(
+                                "🌍 Ubicación Geográfica", 
+                                placeholder="Ej: Sebastea, Armenia histórica",
+                                key="batch_ubicacion",
+                                help="Región, ciudad o área geográfica específica"
+                            )
+                        with col_hist2:
+                            contexto_cultural = st.text_area(
+                                "🏛️ Contexto Cultural",
+                                placeholder="Ej: Cristianismo primitivo bajo persecución...",
+                                key="batch_contexto_cultural",
+                                help="Contexto religioso, político, social de la época",
+                                height=100
+                            )
+                        
+                        # Guardar configuración manual
+                        historical_config = {
+                            "mode": "manual",
+                            "periodo_historico": periodo_historico,
+                            "ubicacion": ubicacion, 
+                            "contexto_cultural": contexto_cultural
+                        }
+                    else:
+                        st.success("🤖 La IA analizará automáticamente cada proyecto para extraer:")
+                        st.write("• 📅 Período histórico exacto")
+                        st.write("• 🌍 Ubicación geográfica")
+                        st.write("• 🏛️ Contexto cultural específico")
+                        
+                        # Configuración del LLM para análisis histórico
+                        st.markdown("**🤖 Configuración del LLM para Análisis Histórico:**")
+                        col_hist_ai1, col_hist_ai2 = st.columns(2)
+                        
+                        with col_hist_ai1:
+                            from utils.ai_services import get_available_providers_info
+                            providers_info = get_available_providers_info()
+                            available_providers = [name for name, info in providers_info.items() if info['configured']]
+                            
+                            if available_providers:
+                                provider_display_names = {
+                                    'openai': 'OpenAI',
+                                    'gemini': 'Google Gemini',
+                                    'ollama': 'Ollama (Local)'
+                                }
+                                
+                                # Priorizar Gemini si está disponible
+                                default_provider_index = 0
+                                if 'gemini' in available_providers:
+                                    default_provider_index = available_providers.index('gemini')
+                                
+                                historical_ai_provider = st.selectbox(
+                                    "Proveedor IA", 
+                                    available_providers,
+                                    index=default_provider_index,
+                                    key="batch_historical_ai_provider",
+                                    format_func=lambda x: provider_display_names.get(x, x.title())
+                                )
+                            else:
+                                st.error("❌ No hay proveedores de IA configurados")
+                                historical_ai_provider = "gemini"  # Fallback
+                        
+                        with col_hist_ai2:
+                            # Modelos según el proveedor seleccionado
+                            if available_providers and historical_ai_provider in providers_info:
+                                available_models = providers_info[historical_ai_provider]['models']
+                                
+                                # Configurar modelo por defecto según el proveedor
+                                default_model_index = 0
+                                if historical_ai_provider == 'gemini' and 'models/gemini-2.5-flash-lite-preview-06-17' in available_models:
+                                    default_model_index = available_models.index('models/gemini-2.5-flash-lite-preview-06-17')
+                                elif historical_ai_provider == 'openai' and 'gpt-4' in available_models:
+                                    default_model_index = available_models.index('gpt-4')
+                                
+                                historical_ai_model = st.selectbox(
+                                    "Modelo", 
+                                    available_models, 
+                                    index=default_model_index,
+                                    key="batch_historical_ai_model"
+                                )
+                            else:
+                                historical_ai_model = 'models/gemini-2.5-flash-lite-preview-06-17'  # Fallback
+                        
+                        # Configuración automática con LLM seleccionado
+                        historical_config = {
+                            "mode": "auto",
+                            "ai_provider": historical_ai_provider,
+                            "ai_model": historical_ai_model
+                        }
+                    
+                    # Guardar en session_state para usar después
+                    st.session_state["batch_historical_config"] = historical_config
+                else:
+                    # Limpiar configuración histórica si no se usa el prompt histórico
+                    if "batch_historical_config" in st.session_state:
+                        del st.session_state["batch_historical_config"]
+                        
             except Exception as e:
                 st.warning(f"No se pudieron cargar los prompts de imágenes: {e}")
                 img_prompt_obj = None
@@ -767,6 +886,76 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
         
         progress_callback(0.05, "Preparando procesador de video")
         
+        # 🏛️ PROCESAMIENTO ESPECIAL PARA PROMPT HISTÓRICO
+        image_config = batch_config["image"].copy()
+        
+        # Verificar si se está usando el prompt histórico
+        prompt_obj = batch_config["image"].get("prompt_obj", {})
+        if prompt_obj and prompt_obj.get("nombre") == "Escenas Fotorrealistas Históricamente Precisas":
+            progress_callback(0.07, "🏛️ Analizando contexto histórico...")
+            
+            # Obtener configuración histórica del session_state
+            historical_config = st.session_state.get("batch_historical_config", {})
+            
+            if historical_config.get("mode") == "manual":
+                # Usar configuración manual
+                periodo_historico = historical_config.get("periodo_historico", "")
+                ubicacion = historical_config.get("ubicacion", "")
+                contexto_cultural = historical_config.get("contexto_cultural", "")
+                
+                progress_callback(0.08, "✍️ Usando configuración histórica manual")
+                
+            elif historical_config.get("mode") == "auto":
+                # Extraer automáticamente con IA
+                try:
+                    from utils.ai_services import extract_historical_context
+                    
+                    ai_provider = historical_config.get("ai_provider", "gemini")
+                    ai_model = historical_config.get("ai_model", "models/gemini-2.5-flash-lite-preview-06-17")
+                    
+                    progress_callback(0.08, f"🤖 Extrayendo contexto histórico con {ai_provider}...")
+                    
+                    historical_data = extract_historical_context(
+                        titulo=proyecto["titulo"],
+                        contexto=proyecto["contexto"],
+                        provider=ai_provider,
+                        model=ai_model
+                    )
+                    
+                    periodo_historico = historical_data.get("periodo_historico", "")
+                    ubicacion = historical_data.get("ubicacion", "")
+                    contexto_cultural = historical_data.get("contexto_cultural", "")
+                    
+                    progress_callback(0.09, "✅ Contexto histórico extraído exitosamente")
+                    
+                except Exception as e:
+                    progress_callback(0.09, f"⚠️ Error extrayendo contexto histórico: {str(e)}")
+                    # Usar valores por defecto si falla
+                    periodo_historico = "Información no especificada"
+                    ubicacion = "Información no especificada"
+                    contexto_cultural = "Información no especificada"
+            else:
+                # Fallback si no hay configuración
+                periodo_historico = "Información no especificada"
+                ubicacion = "Información no especificada"
+                contexto_cultural = "Información no especificada"
+            
+            # Actualizar la configuración de imagen con las variables históricas
+            image_config["prompt_obj"] = prompt_obj  # Mantener el prompt original
+            image_config["historical_context"] = {
+                "periodo_historico": periodo_historico,
+                "ubicacion": ubicacion,
+                "contexto_cultural": contexto_cultural,
+                "extraction_mode": historical_config.get("mode", "fallback")
+            }
+            
+            # Añadir las variables históricas a las variables disponibles para el prompt
+            image_config["historical_variables"] = {
+                "periodo_historico": periodo_historico,
+                "ubicacion": ubicacion,
+                "contexto_cultural": contexto_cultural
+            }
+
         # Preparar configuración completa para el procesador
         full_config = {
             "titulo": proyecto["titulo"],
@@ -776,7 +965,7 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
                 "manual_script": proyecto.get("guion_manual"),
                 **batch_config["script"]
             },
-            "image": batch_config["image"],
+            "image": image_config,  # Usar la configuración de imagen actualizada
             "scenes_config": batch_config["scenes_config"],
             "video": batch_config["video"],
             "audio": batch_config["audio"],

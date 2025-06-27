@@ -395,6 +395,12 @@ class SceneGenerator:
                 'style': image_prompt_config.get('style', '')  # Variable de estilo
             }
             
+            # 🏛️ AÑADIR VARIABLES HISTÓRICAS SI ESTÁN DISPONIBLES
+            historical_variables = image_prompt_config.get('historical_variables', {})
+            if historical_variables:
+                template_variables.update(historical_variables)
+                logger.info(f"[Escena {i+1}] 🏛️ Variables históricas añadidas: {list(historical_variables.keys())}")
+            
             # Obtener las variables requeridas por la plantilla
             template_vars_required = prompt_obj.get('variables', [])
             
@@ -404,6 +410,12 @@ class SceneGenerator:
                 for var in template_vars_required 
                 if var in template_variables
             }
+            
+            # 🏛️ LOGGING ESPECIAL PARA PROMPT HISTÓRICO
+            if prompt_obj.get('nombre') == "Escenas Fotorrealistas Históricamente Precisas":
+                logger.info(f"[Escena {i+1}] 🏛️ PROMPT HISTÓRICO DETECTADO")
+                logger.info(f"[Escena {i+1}] 🏛️ Variables históricas: {historical_variables}")
+                logger.info(f"[Escena {i+1}] 🏛️ Variables filtradas: {filtered_variables}")
             
             try:
                 user_prompt = user_prompt_template.format(**filtered_variables)

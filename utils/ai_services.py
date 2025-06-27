@@ -9,6 +9,7 @@ from pathlib import Path
 import replicate
 import time
 import logging
+import json
 from typing import Union, Optional, Dict, List # Mover imports de typing al principio
 
 # Configuración logging
@@ -373,7 +374,7 @@ def generate_openai_script(system_prompt: str, user_prompt: str, model: str = "g
     ai_service = AIServices()
     if api_key:
         ai_service.openai_key = api_key
-        ai_service.openai_client = OpenAI(api_key=api_key)
+        ai_service.openai_client = openai.OpenAI(api_key=api_key)
     return ai_service._generate_openai_script(system_prompt, user_prompt, model)
 
 def generate_gemini_script(system_prompt: str, user_prompt: str, model: str = "models/gemini-2.5-flash-lite-preview-06-17", api_key: Optional[str] = None) -> str:
@@ -393,6 +394,94 @@ def generate_ollama_script(system_prompt: str, user_prompt: str, model: str = "l
     return ai_service._generate_ollama_script(system_prompt, user_prompt, model)
 
 def generate_image_with_replicate(prompt: str, model_id: str = "black-forest-labs/flux-schnell", **kwargs) -> Union[str, bytes]:
-    """Función pública para generar imágenes con Replicate."""
-    ai_service = AIServices()
-    return ai_service._generate_image_with_replicate(prompt, model_id, **kwargs)
+    """Función de compatibilidad que usa la clase AIServices."""
+    ai_services = AIServices()
+    return ai_services.generate_image(prompt, model_id, **kwargs)
+
+def extract_historical_context(titulo: str, contexto: str, provider: str = "gemini", model: str = "models/gemini-2.5-flash-lite-preview-06-17") -> Dict[str, str]:
+    """
+    Extrae automáticamente el contexto histórico de un título y descripción usando IA.
+    
+    Args:
+        titulo: Título del video/proyecto
+        contexto: Descripción o contexto del contenido
+        provider: Proveedor de IA a usar (gemini, openai, ollama)
+        model: Modelo específico a usar
+        
+    Returns:
+        Dict con las claves: periodo_historico, ubicacion, contexto_cultural
+    """
+    
+    system_prompt = """Eres un experto historiador y analista de contenido histórico.
+Tu tarea es analizar un título y contexto de contenido histórico y extraer información precisa sobre:
+
+1. PERÍODO HISTÓRICO: Fechas específicas, era, época (ej: "Siglo IV d.C., Imperio Romano tardío")
+2. UBICACIÓN GEOGRÁFICA: Lugar específico, región, país de la época (ej: "Sebastea, Armenia histórica")  
+3. CONTEXTO CULTURAL: Situación religiosa, política, social de la época (ej: "Cristianismo primitivo bajo persecución")
+
+INSTRUCCIONES:
+- Sé específico y preciso históricamente
+- Usa terminología académica apropiada
+- Si hay múltiples períodos/lugares, enfócate en el principal
+- Si falta información, usa "Información no especificada" pero intenta inferir del contexto
+- Responde SOLO en formato JSON válido
+
+FORMATO DE RESPUESTA:
+{
+    "periodo_historico": "...",
+    "ubicacion": "...",
+    "contexto_cultural": "..."
+}"""
+
+    user_prompt = f"""Analiza este contenido histórico y extrae la información solicitada:
+
+TÍTULO: {titulo}
+
+CONTEXTO/DESCRIPCIÓN: {contexto}
+
+Extrae el período histórico, ubicación geográfica y contexto cultural específicos. Responde en formato JSON."""
+
+    try:
+        ai_services = AIServices()
+        response = ai_services.generate_content(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt
+        )
+        
+        # Intentar parsear la respuesta JSON
+        try:
+            # Limpiar la respuesta si viene con markdown
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0].strip()
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0].strip()
+            
+            historical_data = json.loads(response)
+            
+            # Validar que tenga las claves esperadas
+            required_keys = ["periodo_historico", "ubicacion", "contexto_cultural"]
+            if all(key in historical_data for key in required_keys):
+                logger.info(f"Contexto histórico extraído exitosamente para: {titulo}")
+                return historical_data
+            else:
+                logger.warning(f"Respuesta incompleta del análisis histórico: {historical_data}")
+                return _get_fallback_historical_context()
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parseando JSON del análisis histórico: {e}")
+            logger.error(f"Respuesta recibida: {response}")
+            return _get_fallback_historical_context()
+            
+    except Exception as e:
+        logger.error(f"Error extrayendo contexto histórico: {e}")
+        return _get_fallback_historical_context()
+
+def _get_fallback_historical_context() -> Dict[str, str]:
+    """Contexto histórico de fallback cuando falla la extracción automática."""
+    return {
+        "periodo_historico": "Información no especificada - verificar manualmente",
+        "ubicacion": "Información no especificada - verificar manualmente", 
+        "contexto_cultural": "Información no especificada - verificar manualmente"
+    }

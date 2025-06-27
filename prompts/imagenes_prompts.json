@@ -148,5 +148,41 @@
       "titulo",
       "contexto"
     ]
+  },
+  {
+    "nombre": "Escenas Fotorrealistas Históricamente Precisas",
+    "system_prompt": "Eres un experto en generación de prompts para imágenes fotorrealistas con precisión histórica y cultural.\nTu tarea es crear prompts detallados que generen imágenes hiperrealistas respetando el contexto histórico, cultural y geográfico específico del contenido.\n\nDEBES ANALIZAR Y INCLUIR:\n- Período histórico exacto y sus características visuales\n- Arquitectura típica de la época y región\n- Vestimenta, peinados y accesorios apropiados para el tiempo\n- Tecnología, objetos y herramientas disponibles en ese período\n- Contexto geográfico y cultural específico\n- Materiales, texturas y colores auténticos de la época\n\nSIEMPRE INCLUYE:\n- Personajes con características físicas y vestimenta históricamente precisas\n- Ambiente y escenario con arquitectura y elementos de la época correcta\n- Iluminación natural apropiada (velas, antorchas, luz solar según corresponda)\n- Composición fotográfica profesional con profundidad de campo\n- Materiales, texturas y objetos auténticos del período\n- Referencias específicas al estilo artístico de la época si aplica\n\nEVITA COMPLETAMENTE:\n- Elementos modernos o anacrónicos\n- Arquitectura, vestimenta o tecnología posterior al período\n- Materiales o colores que no existían en la época\n- Peinados, maquillaje o accesorios modernos\n\nEl prompt debe ser en inglés, históricamente preciso y técnicamente detallado.",
+    "user_prompt": "Genera un prompt detallado para crear una imagen fotorrealista históricamente precisa que represente:\n\nCONTEXTO DEL VIDEO:\nTítulo: {titulo}\nTema general: {contexto}\nPERÍODO HISTÓRICO: {periodo_historico}\nUBICACIÓN GEOGRÁFICA: {ubicacion}\nCONTEXTO CULTURAL: {contexto_cultural}\n\nESCENA A REPRESENTAR:\n{scene_text}\n\nCrea un prompt que:\n1. Respete completamente el período histórico especificado\n2. Incluya arquitectura, vestimenta y objetos auténticos de la época\n3. Mantenga coherencia cultural y geográfica\n4. Use terminología fotográfica técnica precisa\n5. Evite cualquier elemento anacrónico o moderno\n6. Capture la esencia de la escena con máximo realismo histórico\n\nEl prompt debe ser en inglés y extremadamente detallado en aspectos históricos.",
+    "variables": [
+      "contexto",
+      "titulo", 
+      "scene_text",
+      "periodo_historico",
+      "ubicacion",
+      "contexto_cultural"
+    ],
+    "contexto_historico_ejemplos": {
+      "san_blas": {
+        "titulo": "La Vida de San Blas",
+        "contexto": "Documental biográfico sobre San Blas de Sebastea, obispo y mártir cristiano del siglo IV, conocido por sus milagros de curación y su martirio durante las persecuciones de Diocleciano. Enfoque en su vida como médico, su ordenación episcopal, su retiro eremítico y su muerte como mártir.",
+        "periodo_historico": "Siglo IV d.C. (circa 280-316 d.C.), Imperio Romano tardío, era de las persecuciones cristianas",
+        "ubicacion": "Sebastea, Armenia histórica (actual Sivas, Turquía), región montañosa del Asia Menor",
+        "contexto_cultural": "Cristianismo primitivo bajo persecución sistemática del emperador Diocleciano, comunidades cristianas clandestinas, tradición médica greco-romana"
+      },
+      "napoleon": {
+        "titulo": "Las Campañas de Napoleón",
+        "contexto": "Serie documental sobre las campañas militares de Napoleón Bonaparte, analizando sus estrategias, batallas clave, y el impacto de sus conquistas en Europa. Incluye desde su ascenso como general hasta su exilio final, con énfasis en tácticas militares y consecuencias políticas.",
+        "periodo_historico": "1796-1815, Era Napoleónica, Imperio Francés",
+        "ubicacion": "Europa occidental y central, principalmente Francia, Austria, Prusia, Rusia",
+        "contexto_cultural": "Post-Revolución Francesa, nationalism europeo emergente, códigos napoleónicos, Ilustración tardía"
+      },
+      "maya": {
+        "titulo": "El Colapso de la Civilización Maya",
+        "contexto": "Investigación arqueológica sobre las causas del colapso de las ciudades-estado mayas del período Clásico Tardío, explorando teorías sobre sequías, guerra inter-ciudades, colapso ambiental y transformaciones sociales en la región mesoamericana.",
+        "periodo_historico": "800-900 d.C., Período Clásico Tardío Maya",
+        "ubicacion": "Tierras bajas mayas: Petén guatemalteco, Yucatán, Belice, Chiapas",
+        "contexto_cultural": "Civilización maya clásica, sistema de ciudades-estado, escritura jeroglífica, astronomía avanzada, religión politeísta"
+      }
+    }
   }
 ]
