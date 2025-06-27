@@ -75,86 +75,88 @@ def render_panel_publicaciones(app_config: Dict):
     if not publicaciones:
         st.info("Aún no hay publicaciones planificadas. ¡Usa el formulario de arriba para empezar!")
     else:
-        # Crear un DataFrame para mostrar y permitir acciones
-        df_publicaciones = st.dataframe(
-            publicaciones,
-            column_config={
-                "id": st.column_config.NumberColumn("ID", width="small"),
-                "nombre_canal": st.column_config.TextColumn("Canal", width="medium"),
-                "titulo_video": st.column_config.TextColumn("Título del Vídeo", width="large"),
-                "status": st.column_config.TextColumn("Estado"),
-                "fecha_planificacion": st.column_config.DatetimeColumn("Planificado", format="D MMM YYYY, HH:mm"),
-                "fecha_subida": st.column_config.DatetimeColumn("Subido", format="D MMM YYYY, HH:mm"),
-                "ruta_proyecto": st.column_config.TextColumn("Ruta Proyecto"),
-            },
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.subheader("Acciones sobre Publicaciones")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            # Obtener el ID de la primera publicación si está disponible, sino por defecto 1
-            default_pub_id = publicaciones[0]['id'] if publicaciones else 1
-            publicacion_id_generar = st.number_input("ID de Publicación para Enviar al Batch", min_value=1, format="%d", value=default_pub_id, key="gen_id_input")
-            if st.button("🚀 Enviar al Batch Processor"): # Botón para enviar al batch
-                if publicacion_id_generar:
-                    # Obtener detalles del video para enviar al batch
-                    pub_info = next((p for p in publicaciones if p['id'] == publicacion_id_generar), None)
-                    if pub_info:
-                        video_details = db_manager.get_video_details(pub_info['id_video'])
-                        if video_details:
-                            # Inicializar batch_projects si no existe
-                            if "batch_projects" not in st.session_state:
-                                st.session_state.batch_projects = []
-                            
-                            # Crear proyecto para el batch processor
-                            import uuid
-                            from datetime import datetime
-                            
-                            nuevo_proyecto_batch = {
-                                "titulo": video_details['titulo_base'],
-                                "contexto": video_details['contexto'],
-                                "script_type": "✍️ Usar guión manual",  # Siempre manual desde la biblioteca
-                                "guion_manual": video_details['guion'],
-                                "id": str(uuid.uuid4())[:8],
-                                "fecha_añadido": datetime.now().isoformat(),
-                                "cms_publicacion_id": publicacion_id_generar,  # Para tracking
-                                "cms_canal": pub_info['nombre_canal']  # Info adicional
-                            }
-                            
-                            # Añadir al batch processor
-                            st.session_state.batch_projects.append(nuevo_proyecto_batch)
-                            
-                            # Actualizar estado en el CMS
-                            db_manager.update_publicacion_status(publicacion_id_generar, 'En Batch')
-                            
-                            st.success(f"✅ '{video_details['titulo_base']}' enviado al Batch Processor!")
-                            st.info("🔄 Ve a la pestaña 'Batch Processor' para configurar y procesar el video.")
+        # Mostrar publicaciones con botones inline más intuitivos
+        for idx, pub in enumerate(publicaciones):
+            with st.container():
+                # Crear columnas para la información y botones
+                col_info, col_actions = st.columns([4, 1])
+                
+                with col_info:
+                    # Icono según el estado
+                    status_icons = {
+                        'Pendiente': '⏳',
+                        'En Batch': '🚀',
+                        'Generando': '⚙️',
+                        'Generado': '✅',
+                        'Subido': '📺',
+                        'Error': '❌'
+                    }
+                    status_icon = status_icons.get(pub['status'], '❓')
+                    
+                    st.markdown(f"**{status_icon} {pub['titulo_video']}**")
+                    st.caption(f"📺 **{pub['nombre_canal']}** | 🆔 ID: {pub['id']} | 📅 {pub['fecha_planificacion']}")
+                    
+                    # Mostrar info adicional según el estado
+                    if pub['status'] == 'Generado' and pub.get('ruta_proyecto'):
+                        st.caption(f"📁 **Proyecto:** {pub['ruta_proyecto']}")
+                    elif pub['status'] == 'Subido' and pub.get('fecha_subida'):
+                        st.caption(f"📤 **Subido:** {pub['fecha_subida']}")
+                
+                with col_actions:
+                    # Botones según el estado actual
+                    if pub['status'] == 'Pendiente':
+                        if st.button("🚀 A Batch", key=f"batch_{pub['id']}", help="Enviar al Batch Processor"):
+                            # Lógica para enviar al batch
+                            video_details = db_manager.get_video_details(pub['id_video'])
+                            if video_details:
+                                # Inicializar batch_projects si no existe
+                                if "batch_projects" not in st.session_state:
+                                    st.session_state.batch_projects = []
+                                
+                                # Crear proyecto para el batch processor
+                                import uuid
+                                from datetime import datetime
+                                
+                                nuevo_proyecto_batch = {
+                                    "titulo": video_details['titulo_base'],
+                                    "contexto": video_details['contexto'],
+                                    "script_type": "✍️ Usar guión manual",
+                                    "guion_manual": video_details['guion'],
+                                    "id": str(uuid.uuid4())[:8],
+                                    "fecha_añadido": datetime.now().isoformat(),
+                                    "cms_publicacion_id": pub['id'],
+                                    "cms_canal": pub['nombre_canal']
+                                }
+                                
+                                st.session_state.batch_projects.append(nuevo_proyecto_batch)
+                                db_manager.update_publicacion_status(pub['id'], 'En Batch')
+                                
+                                st.success(f"✅ '{video_details['titulo_base']}' enviado al Batch!")
+                                st.rerun()
+                    
+                    elif pub['status'] == 'En Batch':
+                        st.markdown("🚀 **En cola**")
+                        if st.button("📋 Ver Batch", key=f"view_batch_{pub['id']}", help="Ir al Batch Processor"):
+                            st.info("🔄 Ve a la pestaña 'Batch Processor' para procesar este video.")
+                    
+                    elif pub['status'] == 'Generado':
+                        if st.button("✅ Subido", key=f"upload_{pub['id']}", help="Marcar como subido a YouTube"):
+                            db_manager.update_publicacion_status(pub['id'], 'Subido')
+                            st.success("✅ Marcado como subido!")
                             st.rerun()
-                        else:
-                            st.error("No se encontraron detalles del vídeo para enviar al batch.")
-                    else:
-                        st.error("Publicación no encontrada.")
-                else:
-                    st.warning("Por favor, selecciona una publicación válida.")
-
-        with col2:
-            publicacion_id_subir = st.number_input("ID de Publicación para Marcar como Subida", min_value=1, format="%d")
-            if st.button("✅ Marcar como Subido"): # Botón para marcar como subido
-                if publicacion_id_subir:
-                    db_manager.update_publicacion_status(publicacion_id_subir, 'Subido')
-                    st.success(f"Publicación ID: {publicacion_id_subir} marcada como Subida.")
-                    st.rerun()
-
-        with col3:
-            publicacion_id_eliminar = st.number_input("ID de Publicación para Eliminar", min_value=1, format="%d")
-            if st.button("🗑️ Eliminar Publicación"): # Botón para eliminar
-                if publicacion_id_eliminar:
-                    # Aquí podrías añadir lógica para eliminar archivos del proyecto si ruta_proyecto está definida
-                    # db_manager.delete_publicacion(publicacion_id_eliminar) # Necesitaríamos implementar este método
-                    st.warning("Funcionalidad de eliminación no implementada aún.")
+                    
+                    elif pub['status'] == 'Subido':
+                        st.markdown("📺 **Subido**")
+                    
+                    elif pub['status'] == 'Error':
+                        if st.button("🔄 Reintentar", key=f"retry_{pub['id']}", help="Reintentar envío al Batch"):
+                            db_manager.update_publicacion_status(pub['id'], 'Pendiente')
+                            st.info("🔄 Estado cambiado a 'Pendiente'. Puedes volver a enviar al Batch.")
+                            st.rerun()
+                
+                # Línea separadora
+                if idx < len(publicaciones) - 1:
+                    st.markdown("---")
 
     # --- Nota al pie ---
     st.markdown("--- ")
