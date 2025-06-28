@@ -42,65 +42,127 @@ class EfectosVideo:
         return VideoClip(make_frame, duration=clip.duration)
 
     @staticmethod
-    def pan_left(clip, duration=1.0, distance=0.5):
-        """Aplica un efecto de paneo continuo a la izquierda"""
+    def pan_left(clip, duration=1.0, zoom_factor=1.2, distance=0.2):
+        """
+        Aplica un efecto de paneo a la izquierda (movimiento de la cámara a la izquierda).
+        La imagen se mueve de izquierda a derecha en la pantalla.
+        """
         def make_frame(t):
-            # Calcula el desplazamiento basado en el tiempo actual
-            progress = t / clip.duration
-            x = -distance * progress
             frame = clip.get_frame(t)
             h, w = frame.shape[:2]
-            offset = int(x * w)
+
+            # Dimensiones de la ventana de recorte (más pequeña que el frame)
+            new_h = int(h / zoom_factor)
+            new_w = int(w / zoom_factor)
+
+            # El progreso del paneo
+            progress = t / clip.duration
             
-            # Crear un nuevo frame con la imagen original
-            new_frame = frame.copy()
+            # El paneo va desde el borde derecho al centro
+            start_x_max = w - new_w
+            start_x_min = int((w - new_w) / 2) # Centro
             
-            # Si el offset es negativo (movimiento a la izquierda)
-            if offset < 0:
-                # Asegurarse de que las dimensiones coincidan
-                visible_width = w + offset
-                if visible_width > 0:
-                    new_frame[:, :visible_width] = frame[:, -offset:-offset+visible_width]
-                    new_frame[:, visible_width:] = frame[:, :w-visible_width]
-            else:
-                # Asegurarse de que las dimensiones coincidan
-                visible_width = w - offset
-                if visible_width > 0:
-                    new_frame[:, offset:] = frame[:, :visible_width]
-                    new_frame[:, :offset] = frame[:, visible_width:visible_width+offset]
-            
-            return new_frame
+            # Interpolar la posición de inicio X
+            start_x = int(start_x_max - (start_x_max - start_x_min) * progress)
+            start_y = int((h - new_h) / 2) # Mantener centrado verticalmente
+
+            # Recortar y redimensionar
+            cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
         return VideoClip(make_frame, duration=clip.duration)
 
     @staticmethod
-    def pan_right(clip, duration=1.0, distance=0.5):
-        """Aplica un efecto de paneo continuo a la derecha"""
+    def pan_right(clip, duration=1.0, zoom_factor=1.2, distance=0.2):
+        """
+        Aplica un efecto de paneo a la derecha (movimiento de la cámara a la derecha).
+        La imagen se mueve de derecha a izquierda en la pantalla.
+        """
         def make_frame(t):
-            # Calcula el desplazamiento basado en el tiempo actual
-            progress = t / clip.duration
-            x = distance * progress
             frame = clip.get_frame(t)
             h, w = frame.shape[:2]
-            offset = int(x * w)
-            
-            # Crear un nuevo frame con la imagen original
-            new_frame = frame.copy()
-            
-            # Si el offset es negativo (movimiento a la derecha)
-            if offset < 0:
-                # Asegurarse de que las dimensiones coincidan
-                visible_width = w + offset
-                if visible_width > 0:
-                    new_frame[:, -offset:] = frame[:, :visible_width]
-                    new_frame[:, :-offset] = frame[:, visible_width:visible_width+w+offset]
-            else:
-                # Asegurarse de que las dimensiones coincidan
-                visible_width = w - offset
-                if visible_width > 0:
-                    new_frame[:, :visible_width] = frame[:, offset:offset+visible_width]
-                    new_frame[:, visible_width:] = frame[:, :w-visible_width]
-            
-            return new_frame
+
+            # Dimensiones de la ventana de recorte
+            new_h = int(h / zoom_factor)
+            new_w = int(w / zoom_factor)
+
+            # Progreso del paneo
+            progress = t / clip.duration
+
+            # El paneo va desde el centro hacia el borde izquierdo
+            start_x_min = 0
+            start_x_max = int((w - new_w) / 2) # Centro
+
+            # Interpolar la posición de inicio X
+            start_x = int(start_x_max - (start_x_max - start_x_min) * progress)
+            start_y = int((h - new_h) / 2) # Mantener centrado verticalmente
+
+            # Recortar y redimensionar
+            cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
+        return VideoClip(make_frame, duration=clip.duration)
+
+    @staticmethod
+    def pan_up(clip, duration=1.0, zoom_factor=1.2):
+        """
+        Aplica un efecto de paneo hacia arriba (movimiento de la cámara hacia arriba).
+        La imagen se mueve de arriba hacia abajo en la pantalla.
+        """
+        def make_frame(t):
+            frame = clip.get_frame(t)
+            h, w = frame.shape[:2]
+
+            # Dimensiones de la ventana de recorte
+            new_h = int(h / zoom_factor)
+            new_w = int(w / zoom_factor)
+
+            # Progreso del paneo
+            progress = t / clip.duration
+
+            # El paneo va desde el borde superior al centro
+            start_y_min = 0
+            start_y_max = int((h - new_h) / 2) # Centro
+
+            # Interpolar la posición de inicio Y
+            start_y = int(start_y_min + (start_y_max - start_y_min) * progress)
+            start_x = int((w - new_w) / 2) # Mantener centrado horizontalmente
+
+            # Recortar y redimensionar
+            cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
+        return VideoClip(make_frame, duration=clip.duration)
+
+    @staticmethod
+    def pan_down(clip, duration=1.0, zoom_factor=1.2):
+        """
+        Aplica un efecto de paneo hacia abajo (movimiento de la cámara hacia abajo).
+        La imagen se mueve de abajo hacia arriba en la pantalla.
+        """
+        def make_frame(t):
+            frame = clip.get_frame(t)
+            h, w = frame.shape[:2]
+
+            # Dimensiones de la ventana de recorte
+            new_h = int(h / zoom_factor)
+            new_w = int(w / zoom_factor)
+
+            # Progreso del paneo
+            progress = t / clip.duration
+
+            # El paneo va desde el borde inferior al centro
+            start_y_max = h - new_h
+            start_y_min = int((h - new_h) / 2) # Centro
+
+            # Interpolar la posición de inicio Y
+            start_y = int(start_y_max - (start_y_max - start_y_min) * progress)
+            start_x = int((w - new_w) / 2) # Mantener centrado horizontalmente
+
+            # Recortar y redimensionar
+            cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
         return VideoClip(make_frame, duration=clip.duration)
 
     @staticmethod
@@ -134,57 +196,254 @@ class EfectosVideo:
         return VideoClip(make_frame, duration=clip.duration)
 
     @staticmethod
-    def kenburns(clip, duration=1.0, zoom_start=1.0, zoom_end=1.5, pan_start=(0, 0), pan_end=(0.2, 0.2)):
+    def rotate_180(clip):
+        """Rota la imagen 180 grados."""
+        def make_frame(t):
+            # Rotar 180 grados es equivalente a np.rot90 dos veces
+            return np.rot90(clip.get_frame(t), k=2)
+        return VideoClip(make_frame, duration=clip.duration)
+
+    @staticmethod
+    def kenburns(clip, duration=None, zoom_start=1.0, zoom_end=1.2, pan_start=(0.5, 0.5), pan_end=(0.5, 0.5)):
         """
-        Aplica un efecto Ken Burns al clip.
+        Aplica un efecto Ken Burns (zoom y paneo simultáneos) al clip.
+
+        Args:
+            clip: Clip de video o imagen.
+            duration: Duración del efecto. Si es None, usa la duración del clip.
+            zoom_start: Factor de zoom inicial (ej: 1.0 para no zoom).
+            zoom_end: Factor de zoom final (ej: 1.2 para 20% de zoom).
+            pan_start: Tupla (x, y) del centro del cuadro al inicio (0.0 a 1.0).
+                       (0.5, 0.5) es el centro de la imagen.
+            pan_end: Tupla (x, y) del centro del cuadro al final (0.0 a 1.0).
+        """
+        if duration is None:
+            duration = clip.duration
+
+        def make_frame(t):
+            frame = clip.get_frame(t)
+            h, w = frame.shape[:2]
+
+            # Interpolar linealmente el zoom y el paneo
+            progress = t / duration
+            current_zoom = zoom_start + (zoom_end - zoom_start) * progress
+            current_pan_x = pan_start[0] + (pan_end[0] - pan_start[0]) * progress
+            current_pan_y = pan_start[1] + (pan_end[1] - pan_start[1]) * progress
+
+            # Calcular las dimensiones de la ventana de recorte
+            new_w = int(w / current_zoom)
+            new_h = int(h / current_zoom)
+
+            # Calcular la posición de la ventana de recorte
+            # El centro del recorte se mueve desde pan_start a pan_end
+            center_x = current_pan_x * w
+            center_y = current_pan_y * h
+
+            start_x = int(center_x - new_w / 2)
+            start_y = int(center_y - new_h / 2)
+
+            # Asegurarse de que la ventana de recorte no se salga de los límites de la imagen
+            start_x = max(0, min(start_x, w - new_w))
+            start_y = max(0, min(start_y, h - new_h))
+
+            # Recortar y redimensionar a las dimensiones originales del clip
+            cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
+        return VideoClip(make_frame, duration=duration)
+
+    @staticmethod
+    def shake(clip, duration=None, intensity=5, zoom_factor=1.1):
+        """
+        Aplica un efecto de sacudida (shake) al clip.
+
+        Args:
+            clip: Clip de video o imagen.
+            duration: Duración del efecto. Si es None, usa la duración del clip.
+            intensity: Máximo desplazamiento en píxeles para la sacudida.
+            zoom_factor: Zoom para evitar bordes negros.
+        """
+        if duration is None:
+            duration = clip.duration
+
+        def make_frame(t):
+            frame = clip.get_frame(t)
+            h, w = frame.shape[:2]
+
+            # Aplicar un zoom constante para tener margen
+            new_w = int(w / zoom_factor)
+            new_h = int(h / zoom_factor)
+
+            # Generar un desplazamiento aleatorio para cada fotograma
+            delta_x = np.random.uniform(-intensity, intensity)
+            delta_y = np.random.uniform(-intensity, intensity)
+
+            # Calcular la posición de inicio del recorte, centrada y con el temblor
+            start_x = int((w - new_w) / 2 + delta_x)
+            start_y = int((h - new_h) / 2 + delta_y)
+
+            # Asegurarse de que la ventana de recorte no se salga de los límites
+            start_x = max(0, min(start_x, w - new_w))
+            start_y = max(0, min(start_y, h - new_h))
+
+            # Recortar y redimensionar
+            cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
+        return VideoClip(make_frame, duration=duration)
+
+    @staticmethod
+    def shake_zoom_combo(clip, shake_duration=2.0, intensity=8, zoom_factor_shake=1.2, zoom_in_factor=1.4, zoom_out_factor=1.6):
+        """
+        Efecto combinado: Shake inicial por 1-2 segundos, luego zoom in y zoom out.
+        
         Args:
             clip: Clip de video o imagen
-            duration: Duración del efecto
-            zoom_start: Factor de zoom inicial (1.0 = tamaño normal)
-            zoom_end: Factor de zoom final
-            pan_start: Posición inicial del paneo (x, y) en porcentaje
-            pan_end: Posición final del paneo (x, y) en porcentaje
+            shake_duration: Duración del shake inicial en segundos (1.0-2.0 recomendado)
+            intensity: Intensidad del shake
+            zoom_factor_shake: Zoom del shake para evitar bordes negros
+            zoom_in_factor: Factor de zoom in después del shake
+            zoom_out_factor: Factor de zoom out al final
         """
+        total_duration = clip.duration
+        
+        # Distribución de tiempo:
+        # - shake_duration segundos: shake
+        # - resto del tiempo dividido entre zoom_in y zoom_out
+        remaining_time = total_duration - shake_duration
+        zoom_in_duration = remaining_time * 0.6  # 60% para zoom in
+        zoom_out_duration = remaining_time * 0.4  # 40% para zoom out
+        
         def make_frame(t):
-            # Calcular el progreso del efecto
-            progress = t / duration
-            
-            # Calcular el zoom actual
-            zoom = zoom_start + (zoom_end - zoom_start) * progress
-            
-            # Calcular la posición del paneo actual
-            pan_x = pan_start[0] + (pan_end[0] - pan_start[0]) * progress
-            pan_y = pan_start[1] + (pan_end[1] - pan_start[1]) * progress
-            
-            # Obtener el frame original
             frame = clip.get_frame(t)
             h, w = frame.shape[:2]
             
-            # Calcular las nuevas dimensiones basadas en el zoom
-            new_h = int(h / zoom)
-            new_w = int(w / zoom)
+            if t <= shake_duration:
+                # FASE 1: SHAKE (primeros 1-2 segundos)
+                # Aplicar zoom constante para tener margen
+                new_w = int(w / zoom_factor_shake)
+                new_h = int(h / zoom_factor_shake)
+                
+                # Generar desplazamiento aleatorio
+                delta_x = np.random.uniform(-intensity, intensity)
+                delta_y = np.random.uniform(-intensity, intensity)
+                
+                # Posición con temblor
+                start_x = int((w - new_w) / 2 + delta_x)
+                start_y = int((h - new_h) / 2 + delta_y)
+                
+                # Asegurar límites
+                start_x = max(0, min(start_x, w - new_w))
+                start_y = max(0, min(start_y, h - new_h))
+                
+                cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+                
+            elif t <= shake_duration + zoom_in_duration:
+                # FASE 2: ZOOM IN (después del shake)
+                time_in_zoom_in = t - shake_duration
+                progress = time_in_zoom_in / zoom_in_duration
+                
+                # Zoom progresivo de 1.0 a zoom_in_factor
+                current_zoom = 1.0 + (zoom_in_factor - 1.0) * progress
+                
+                new_h = int(h / current_zoom)
+                new_w = int(w / current_zoom)
+                center_y = h // 2
+                center_x = w // 2
+                start_y = center_y - new_h // 2
+                start_x = center_x - new_w // 2
+                
+                cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+                
+            else:
+                # FASE 3: ZOOM OUT (final)
+                time_in_zoom_out = t - shake_duration - zoom_in_duration
+                progress = time_in_zoom_out / zoom_out_duration
+                
+                # Zoom progresivo de zoom_out_factor a zoom_in_factor (zoom out)
+                current_zoom = zoom_out_factor - (zoom_out_factor - zoom_in_factor) * progress
+                
+                new_h = int(h / current_zoom)
+                new_w = int(w / current_zoom)
+                center_y = h // 2
+                center_x = w // 2
+                start_y = center_y - new_h // 2
+                start_x = center_x - new_w // 2
+                
+                cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
             
-            # Calcular el centro de la imagen
-            center_y = h // 2
-            center_x = w // 2
-            
-            # Calcular el desplazamiento basado en el paneo
-            offset_x = int(pan_x * w)
-            offset_y = int(pan_y * h)
-            
-            # Calcular la posición de inicio del recorte
-            start_y = center_y - new_h // 2 + offset_y
-            start_x = center_x - new_w // 2 + offset_x
-            
-            # Asegurar que no nos salgamos de los límites de la imagen
-            start_y = max(0, min(start_y, h - new_h))
-            start_x = max(0, min(start_x, w - new_w))
-            
-            # Recortar y redimensionar
-            cropped = frame[start_y:start_y+new_h, start_x:start_x+new_w]
             return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
+        return VideoClip(make_frame, duration=total_duration)
+
+    @staticmethod
+    def shake_kenburns_combo(clip, shake_duration=1.5, intensity=10, zoom_factor_shake=1.15, 
+                           kenburns_zoom_start=1.0, kenburns_zoom_end=1.4, 
+                           kenburns_pan_start=(0.2, 0.2), kenburns_pan_end=(0.7, 0.6)):
+        """
+        Efecto combinado: Shake inicial breve, luego efecto Ken Burns suave.
         
-        return VideoClip(make_frame, duration=clip.duration)
+        Args:
+            clip: Clip de video o imagen
+            shake_duration: Duración del shake inicial (1.0-2.0 segundos recomendado)
+            intensity: Intensidad del shake
+            zoom_factor_shake: Zoom del shake para evitar bordes
+            kenburns_zoom_start: Zoom inicial del Ken Burns
+            kenburns_zoom_end: Zoom final del Ken Burns
+            kenburns_pan_start: Posición inicial del paneo (x, y)
+            kenburns_pan_end: Posición final del paneo (x, y)
+        """
+        total_duration = clip.duration
+        kenburns_duration = total_duration - shake_duration
+        
+        def make_frame(t):
+            frame = clip.get_frame(t)
+            h, w = frame.shape[:2]
+            
+            if t <= shake_duration:
+                # FASE 1: SHAKE INICIAL
+                new_w = int(w / zoom_factor_shake)
+                new_h = int(h / zoom_factor_shake)
+                
+                delta_x = np.random.uniform(-intensity, intensity)
+                delta_y = np.random.uniform(-intensity, intensity)
+                
+                start_x = int((w - new_w) / 2 + delta_x)
+                start_y = int((h - new_h) / 2 + delta_y)
+                
+                start_x = max(0, min(start_x, w - new_w))
+                start_y = max(0, min(start_y, h - new_h))
+                
+                cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+                
+            else:
+                # FASE 2: KEN BURNS
+                time_in_kenburns = t - shake_duration
+                progress = time_in_kenburns / kenburns_duration
+                
+                # Interpolar zoom y paneo
+                current_zoom = kenburns_zoom_start + (kenburns_zoom_end - kenburns_zoom_start) * progress
+                current_pan_x = kenburns_pan_start[0] + (kenburns_pan_end[0] - kenburns_pan_start[0]) * progress
+                current_pan_y = kenburns_pan_start[1] + (kenburns_pan_end[1] - kenburns_pan_start[1]) * progress
+                
+                # Calcular dimensiones y posición
+                new_w = int(w / current_zoom)
+                new_h = int(h / current_zoom)
+                
+                center_x = current_pan_x * w
+                center_y = current_pan_y * h
+                
+                start_x = int(center_x - new_w / 2)
+                start_y = int(center_y - new_h / 2)
+                
+                start_x = max(0, min(start_x, w - new_w))
+                start_y = max(0, min(start_y, h - new_h))
+                
+                cropped = frame[start_y:start_y + new_h, start_x:start_x + new_w]
+            
+            return np.array(Image.fromarray(cropped).resize((w, h), Image.Resampling.LANCZOS))
+
+        return VideoClip(make_frame, duration=total_duration)
 
     @staticmethod
     def apply_effect(clip, effect_name, **kwargs):
@@ -194,10 +453,16 @@ class EfectosVideo:
             "zoom_out": EfectosVideo.zoom_out,
             "pan_left": EfectosVideo.pan_left,
             "pan_right": EfectosVideo.pan_right,
+            "pan_up": EfectosVideo.pan_up,
+            "pan_down": EfectosVideo.pan_down,
+            "shake": EfectosVideo.shake,
+            "shake_zoom_combo": EfectosVideo.shake_zoom_combo,
+            "shake_kenburns_combo": EfectosVideo.shake_kenburns_combo,
             "fade_in": EfectosVideo.fade_in,
             "fade_out": EfectosVideo.fade_out,
             "mirror_x": EfectosVideo.mirror_x,
             "mirror_y": EfectosVideo.mirror_y,
+            "rotate_180": EfectosVideo.rotate_180,
             "kenburns": EfectosVideo.kenburns
         }
         
