@@ -1,0 +1,14 @@
+{
+  "titulo": "San Ignacio de Loyola",
+  "contexto_original": "Fundador de la Compañía de Jesús, militar vasco convertido en santo tras ser herido en Pamplona. \n    Creador de los Ejercicios Espirituales, reformador educativo y religioso. Estableció la orden jesuita en 1540, \n    revolucionando la educación católica y las misiones. Figura clave de la Contrarreforma.",
+  "contexto_extraido": {
+    "periodo_historico": "Renacimiento Tardío / Contrarreforma (siglo XVI)",
+    "ubicacion": "País Vasco, España (lugar de nacimiento y servicio militar); Europa (expansión de la Compañía de Jesús)",
+    "contexto_cultural": "Profundos cambios religiosos y sociales en Europa. La Reforma Protestante y la respuesta católica de la Contrarreforma. Época de expansión misionera y reestructuración educativa dentro de la Iglesia Católica. Auge del humanismo y la necesidad de una formación intelectual y espiritual rigurosa.",
+    "fecha_nacimiento": 1491,
+    "fecha_muerte": 1556,
+    "edad_personaje": 45
+  },
+  "nota": "Generado POST-implementación de mejoras de edad",
+  "version": "mejorado"
+}

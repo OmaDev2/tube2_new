@@ -610,7 +610,10 @@ class SceneGenerator:
         logger.info(f"📊 Proyecto: {project_info.get('titulo', 'Sin título')}")
         logger.info(f"📊 Total de escenas: {len(scenes)}")
         logger.info(f"📊 Configuración inicial recibida:")
-        logger.info(f"  • prompt_obj inicial: {image_prompt_config.get('prompt_obj', {}).get('nombre', 'No definido')}")
+        prompt_obj_name = "No definido"
+        if image_prompt_config.get('prompt_obj') and hasattr(image_prompt_config['prompt_obj'], 'get'):
+            prompt_obj_name = image_prompt_config['prompt_obj'].get('nombre', 'Sin nombre')
+        logger.info(f"  • prompt_obj inicial: {prompt_obj_name}")
         logger.info(f"  • historical_variables inicial: {image_prompt_config.get('historical_variables', 'No definidas')}")
         logger.info(f"  • providers: {image_prompt_config.get('img_prompt_providers_priority', ['gemini'])}")
         
@@ -649,6 +652,17 @@ class SceneGenerator:
             for scene in scenes:
                 scene['image_prompt'] = f"Photorealistic, cinematic: {scene.get('text', '')[:350]}"
             return scenes
+
+        # 🎭 GENERACIÓN DE DOSSIER DE PERSONAJE PARA COHERENCIA VISUAL (FASE 2)
+        character_dossier = None
+        if self._should_use_character_dossier(project_info):
+            logger.info("🎭 INICIANDO GENERACIÓN DE DOSSIER PARA COHERENCIA VISUAL")
+            character_dossier = self._generate_character_dossier(project_info, ai_service)
+            if character_dossier:
+                logger.info(f"✅ Dossier generado exitosamente ({len(character_dossier)} caracteres)")
+                logger.info("🎭 Coherencia visual del personaje ACTIVADA para todas las escenas")
+            else:
+                logger.warning("⚠️ No se pudo generar el dossier, continuando sin coherencia de personaje")
 
         system_prompt = prompt_obj.get("system_prompt", "")
         user_prompt_template = prompt_obj.get("user_prompt", "Generate an image for: {scene_text}")
@@ -705,6 +719,33 @@ class SceneGenerator:
             # Obtener las variables requeridas por la plantilla
             template_vars_required = prompt_obj.get('variables', [])
             
+            # 🎭 INTEGRACIÓN CON DOSSIER DE PERSONAJE (FASE 2)
+            if character_dossier:
+                logger.info(f"[Escena {i+1}] 🎭 APLICANDO COHERENCIA VISUAL DEL PERSONAJE")
+                
+                # Detectar edad del personaje en esta escena
+                scene_text = scene.get('text', '')
+                project_context = project_info.get('contexto', '')
+                detected_age_stage = self._detect_character_age_stage(scene_text, project_context)
+                
+                # Extraer descripción específica del dossier
+                character_description = self._extract_character_description_from_dossier(character_dossier, detected_age_stage)
+                
+                if character_description:
+                    # Añadir la descripción del personaje como variable separada
+                    template_variables['character_description'] = character_description
+                    
+                    logger.info(f"[Escena {i+1}] ✅ Descripción del personaje aplicada")
+                    logger.info(f"[Escena {i+1}] 🎯 Edad detectada: {detected_age_stage.upper()}")
+                    logger.info(f"[Escena {i+1}] 📝 Descripción: {character_description[:100]}...")
+                else:
+                    # Si no hay descripción específica, usar string vacío para evitar errores
+                    template_variables['character_description'] = ""
+                    logger.warning(f"[Escena {i+1}] ⚠️ No se pudo extraer descripción para edad: {detected_age_stage}")
+            else:
+                # Si no hay dossier, usar string vacío para la descripción del personaje
+                template_variables['character_description'] = ""
+            
             # Filtrar solo las variables que realmente necesita la plantilla
             filtered_variables = {
                 var: template_variables.get(var, '') 
@@ -717,6 +758,12 @@ class SceneGenerator:
                 logger.info(f"[Escena {i+1}] 🏛️ PROMPT HISTÓRICO DETECTADO")
                 logger.info(f"[Escena {i+1}] 🏛️ Variables históricas: {historical_variables}")
                 logger.info(f"[Escena {i+1}] 🏛️ Variables filtradas: {filtered_variables}")
+                
+                # 🎭 LOGGING ESPECIAL PARA COHERENCIA DE PERSONAJE
+                if character_dossier:
+                    logger.info(f"[Escena {i+1}] 🎭 COHERENCIA DE PERSONAJE ACTIVA")
+                    if 'character_description' in template_variables:
+                        logger.info(f"[Escena {i+1}] 🎭 Descripción integrada en prompt histórico")
             
             try:
                 user_prompt = user_prompt_template.format(**filtered_variables)
@@ -1049,7 +1096,7 @@ class SceneGenerator:
         
         # Verificar si ya está usando el prompt histórico
         current_prompt = image_prompt_config.get("prompt_obj", {})
-        if current_prompt.get("nombre") == "Escenas Fotorrealistas Históricamente Precisas":
+        if current_prompt and current_prompt.get("nombre") == "Escenas Fotorrealistas Históricamente Precisas":
             logger.info(f"🏛️ Proyecto '{titulo}' ya usa prompt histórico correcto")
             
             # 🔧 IMPORTANTE: Incluso si ya usa el prompt histórico, verificar que tenga variables históricas
@@ -1099,3 +1146,402 @@ class SceneGenerator:
         except Exception as e:
             logger.error(f"❌ Error forzando prompt histórico: {e}")
             return image_prompt_config
+
+    def _generate_character_dossier(self, project_info: Dict, ai_service: AIServices) -> Optional[str]:
+        """
+        Genera un dossier completo del personaje principal del proyecto.
+        
+        Args:
+            project_info: Información del proyecto con titulo y contexto
+            ai_service: Servicio de IA para generación de contenido
+            
+        Returns:
+            str: Dossier completo del personaje con secciones por edad, o None si falla
+        """
+        logger.info("🎭 GENERANDO DOSSIER DE PERSONAJE PRINCIPAL")
+        logger.info("=" * 60)
+        
+        # Verificar que tenemos la información básica necesaria
+        titulo = project_info.get("titulo", "")
+        contexto = project_info.get("contexto", "")
+        
+        if not titulo or not contexto:
+            logger.warning(f"⚠️ Información insuficiente para generar dossier")
+            logger.warning(f"  • Título: {'✓' if titulo else '✗'} ({titulo})")
+            logger.warning(f"  • Contexto: {'✓' if contexto else '✗'} ({len(contexto)} chars)")
+            return None
+        
+        # Cargar la plantilla de dossier
+        try:
+            import json
+            prompts_file = Path(__file__).parent.parent / "prompts" / "imagenes_prompts.json"
+            
+            with open(prompts_file, 'r', encoding='utf-8') as f:
+                all_prompts = json.load(f)
+            
+            # Buscar la plantilla de dossier
+            dossier_template = None
+            for prompt in all_prompts:
+                if prompt.get("nombre") == "Dossier de Personaje Principal":
+                    dossier_template = prompt
+                    break
+            
+            if not dossier_template:
+                logger.error("❌ No se encontró la plantilla 'Dossier de Personaje Principal'")
+                return None
+                
+            logger.info(f"✅ Plantilla de dossier cargada exitosamente")
+            
+        except Exception as e:
+            logger.error(f"❌ Error cargando plantilla de dossier: {e}")
+            return None
+        
+        # Preparar variables para la plantilla
+        template_variables = {
+            'titulo': titulo,
+            'contexto': contexto
+        }
+        
+        # Formatear prompts con las variables
+        system_prompt = dossier_template.get("system_prompt", "")
+        user_prompt_template = dossier_template.get("user_prompt", "")
+        
+        try:
+            user_prompt = user_prompt_template.format(**template_variables)
+        except KeyError as e:
+            logger.error(f"❌ Variable faltante en plantilla de dossier: {e}")
+            return None
+        
+        # Configuración para generación
+        provider_priority = ['gemini', 'openai', 'ollama']  # Priorizar Gemini para mejor calidad
+        
+        logger.info(f"🤖 GENERANDO DOSSIER:")
+        logger.info(f"  • Proyecto: {titulo}")
+        logger.info(f"  • Proveedores: {provider_priority}")
+        logger.info(f"  • Contexto: {len(contexto)} caracteres")
+        
+        # DEBUG: Mostrar prompts que se enviarán
+        logger.info(f"🔍 SYSTEM PROMPT PARA DOSSIER:")
+        logger.info(f"{'-' * 40}")
+        logger.info(f"{system_prompt}")
+        logger.info(f"{'-' * 40}")
+        
+        logger.info(f"🔍 USER PROMPT PARA DOSSIER:")
+        logger.info(f"{'-' * 40}")
+        logger.info(f"{user_prompt}")
+        logger.info(f"{'-' * 40}")
+        
+        # Intentar generar dossier con cada proveedor
+        for provider in provider_priority:
+            try:
+                logger.info(f"🤖 Intentando generar dossier con {provider.upper()}...")
+                
+                # Usar modelo específico según proveedor
+                model_map = {
+                    'gemini': 'models/gemini-2.5-flash-lite-preview-06-17',
+                    'openai': 'gpt-3.5-turbo',
+                    'ollama': 'llama3.2'
+                }
+                model = model_map.get(provider, 'default')
+                
+                # Generar dossier
+                dossier_content = ai_service.generate_content(
+                    provider=provider,
+                    model=model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt
+                )
+                
+                if dossier_content and len(str(dossier_content).strip()) > 100:
+                    logger.info(f"✅ DOSSIER GENERADO EXITOSAMENTE con {provider.upper()}")
+                    logger.info(f"📊 Longitud del dossier: {len(str(dossier_content))} caracteres")
+                    
+                    # DEBUG: Mostrar preview del dossier
+                    dossier_str = str(dossier_content)
+                    preview_lines = dossier_str.split('\n')[:10]  # Primeras 10 líneas
+                    logger.info(f"🔍 PREVIEW DEL DOSSIER GENERADO:")
+                    logger.info(f"{'=' * 50}")
+                    for i, line in enumerate(preview_lines, 1):
+                        logger.info(f"{i:2d}: {line}")
+                    if len(dossier_str.split('\n')) > 10:
+                        logger.info(f"... (y {len(dossier_str.split('\n')) - 10} líneas más)")
+                    logger.info(f"{'=' * 50}")
+                    
+                    return dossier_str
+                else:
+                    logger.warning(f"⚠️ Dossier vacío o muy corto desde {provider}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error generando dossier con {provider}: {e}")
+                continue
+        
+        # Si llegamos aquí, todos los proveedores fallaron
+        logger.error(f"❌ FALLÓ LA GENERACIÓN DE DOSSIER con todos los proveedores")
+        logger.error(f"❌ Proveedores intentados: {provider_priority}")
+        return None
+
+    def _detect_character_age_stage(self, scene_text: str, project_context: str = "") -> str:
+        """
+        Detecta la etapa de edad del personaje principal en una escena específica.
+        
+        Args:
+            scene_text: Texto de la escena a analizar
+            project_context: Contexto adicional del proyecto
+            
+        Returns:
+            str: Etapa de edad detectada ('infancia', 'juventud', 'adultez', 'madurez')
+        """
+        logger.info(f"🔍 DETECTANDO EDAD DEL PERSONAJE EN ESCENA")
+        logger.info(f"📝 Texto de escena: {scene_text[:100]}...")
+        
+        # Normalizar texto para análisis
+        text_lower = scene_text.lower().strip()
+        
+        # Palabras clave por etapa de vida
+        age_keywords = {
+            'infancia': [
+                'niño', 'niña', 'infancia', 'pequeño', 'pequeña', 'hijo', 'hija',
+                'crianza', 'padres', 'familia', 'hogar paterno', 'juventud temprana',
+                'nacimiento', 'nacer', 'nació', 'crecer', 'criado', 'crianza',
+                'años de niñez', 'desde pequeño', 'siendo niño', 'cuando era niño'
+            ],
+            'juventud': [
+                'joven', 'juventud', 'adolescente', 'estudios', 'aprendizaje', 
+                'formación', 'educación', 'maestro', 'discípulo', 'estudiante',
+                'vocación', 'llamado', 'ordenación', 'seminarista', 'noviciado',
+                'años de juventud', 'siendo joven', 'en su juventud', 'años mozos'
+            ],
+            'adultez': [
+                'adulto', 'maduro', 'obispo', 'sacerdote', 'ministerio', 'pastoral',
+                'comunidad', 'liderazgo', 'responsabilidad', 'cargo', 'posición',
+                'médico', 'sanador', 'milagros', 'curaciones', 'servicio',
+                'años de ministerio', 'siendo obispo', 'como líder', 'en la madurez'
+            ],
+            'madurez': [
+                'anciano', 'mayor', 'vejez', 'sabiduría', 'experiencia', 'veterano',
+                'persecución', 'martirio', 'sufrimiento', 'tortura', 'final',
+                'últimos años', 'muerte', 'morir', 'murió', 'falleció',
+                'al final de su vida', 'en sus últimos días', 'anciano venerable'
+            ]
+        }
+        
+        # Contadores de coincidencias por etapa
+        age_scores = {stage: 0 for stage in age_keywords.keys()}
+        
+        # Buscar palabras clave y acumular puntuaciones
+        for stage, keywords in age_keywords.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    age_scores[stage] += 1
+                    logger.debug(f"🔍 Keyword '{keyword}' encontrada para etapa '{stage}'")
+        
+        # Análisis de contexto numérico (años, edades específicas)
+        import re
+        
+        # Buscar referencias a edades específicas
+        age_patterns = [
+            r'(\d+)\s*años?',
+            r'edad\s*de\s*(\d+)',
+            r'(\d+)\s*años?\s*de\s*edad',
+            r'a\s*los\s*(\d+)',
+            r'cuando\s*tenía\s*(\d+)'
+        ]
+        
+        found_ages = []
+        for pattern in age_patterns:
+            matches = re.findall(pattern, text_lower)
+            found_ages.extend([int(age) for age in matches if age.isdigit()])
+        
+        # Si encontramos edades específicas, ajustar puntuaciones
+        if found_ages:
+            for age in found_ages:
+                logger.info(f"🔢 Edad específica detectada: {age} años")
+                if 0 <= age <= 12:
+                    age_scores['infancia'] += 3
+                elif 13 <= age <= 25:
+                    age_scores['juventud'] += 3
+                elif 26 <= age <= 50:
+                    age_scores['adultez'] += 3
+                elif age > 50:
+                    age_scores['madurez'] += 3
+        
+        # Determinar etapa con mayor puntuación
+        detected_stage = max(age_scores, key=age_scores.get)
+        max_score = age_scores[detected_stage]
+        
+        # Si no hay puntuación clara, usar lógica de fallback
+        if max_score == 0:
+            logger.warning(f"⚠️ No se detectaron indicadores de edad claros")
+            
+            # Fallback basado en contexto general
+            if any(word in text_lower for word in ['obispo', 'ministerio', 'liderazgo']):
+                detected_stage = 'adultez'
+            elif any(word in text_lower for word in ['persecución', 'martirio', 'muerte']):
+                detected_stage = 'madurez'
+            elif any(word in text_lower for word in ['estudios', 'formación', 'vocación']):
+                detected_stage = 'juventud'
+            else:
+                detected_stage = 'adultez'  # Default para contextos neutrales
+            
+            logger.info(f"🔄 Usando fallback: '{detected_stage}' basado en contexto")
+        
+        logger.info(f"🎯 RESULTADO DETECCIÓN DE EDAD:")
+        logger.info(f"  • Etapa detectada: {detected_stage.upper()}")
+        logger.info(f"  • Puntuaciones: {age_scores}")
+        logger.info(f"  • Edades específicas: {found_ages}")
+        
+        return detected_stage
+
+    def _extract_character_description_from_dossier(self, dossier: str, age_stage: str) -> str:
+        """
+        Extrae la descripción específica del personaje para una etapa de edad del dossier.
+        
+        Args:
+            dossier: Dossier completo del personaje
+            age_stage: Etapa de edad ('infancia', 'juventud', 'adultez', 'madurez')
+            
+        Returns:
+            str: Descripción específica para la etapa, o descripción genérica si no se encuentra
+        """
+        logger.info(f"📋 EXTRAYENDO DESCRIPCIÓN PARA ETAPA: {age_stage.upper()}")
+        
+        if not dossier or not age_stage:
+            logger.warning("⚠️ Dossier o etapa de edad vacíos")
+            return ""
+        
+        # Mapeo de etapas a patrones de búsqueda en el dossier
+        stage_patterns = {
+            'infancia': [r'\*\*INFANCIA.*?\*\*.*?(?=\*\*[A-Z]|\Z)', r'INFANCIA.*?(?=\*\*[A-Z]|\Z)'],
+            'juventud': [r'\*\*JUVENTUD.*?\*\*.*?(?=\*\*[A-Z]|\Z)', r'JUVENTUD.*?(?=\*\*[A-Z]|\Z)'],
+            'adultez': [r'\*\*ADULTEZ.*?\*\*.*?(?=\*\*[A-Z]|\Z)', r'ADULTEZ.*?(?=\*\*[A-Z]|\Z)'],
+            'madurez': [r'\*\*MADUREZ.*?\*\*.*?(?=\*\*[A-Z]|\Z)', r'MADUREZ.*?(?=\*\*[A-Z]|\Z)', 
+                       r'\*\*VEJEZ.*?\*\*.*?(?=\*\*[A-Z]|\Z)', r'VEJEZ.*?(?=\*\*[A-Z]|\Z)']
+        }
+        
+        import re
+        
+        # Buscar la sección correspondiente
+        patterns = stage_patterns.get(age_stage, [])
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, dossier, re.DOTALL | re.IGNORECASE)
+            if matches:
+                description = matches[0].strip()
+                
+                # Limpiar la descripción
+                description = re.sub(r'\*\*[^*]+\*\*', '', description)  # Remover encabezados
+                description = re.sub(r'\s+', ' ', description).strip()   # Normalizar espacios
+                
+                # Filtrar líneas vacías y bullets
+                lines = [line.strip() for line in description.split('\n') if line.strip()]
+                clean_lines = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('*') and len(line) > 10:
+                        # Remover bullets y limpiar
+                        line = re.sub(r'^\*\s*', '', line)
+                        line = re.sub(r'^\*\*.*?\*\*\s*', '', line)
+                        if line:
+                            clean_lines.append(line)
+                
+                final_description = ' '.join(clean_lines)
+                
+                if final_description and len(final_description) > 50:
+                    logger.info(f"✅ Descripción extraída para '{age_stage}':")
+                    logger.info(f"  • Longitud: {len(final_description)} caracteres")
+                    logger.info(f"  • Preview: {final_description[:150]}...")
+                    return final_description
+        
+        # Si no se encuentra la sección específica, crear descripción genérica
+        logger.warning(f"⚠️ No se encontró sección específica para '{age_stage}' en el dossier")
+        
+        # Extraer información general del dossier para crear descripción genérica
+        generic_description = self._create_generic_description_from_dossier(dossier, age_stage)
+        
+        logger.info(f"🔄 Usando descripción genérica para '{age_stage}':")
+        logger.info(f"  • Longitud: {len(generic_description)} caracteres")
+        logger.info(f"  • Preview: {generic_description[:150]}...")
+        
+        return generic_description
+
+    def _create_generic_description_from_dossier(self, dossier: str, age_stage: str) -> str:
+        """
+        Crea una descripción genérica basada en el contenido general del dossier.
+        """
+        # Extraer características físicas generales
+        physical_keywords = ['cabello', 'ojos', 'complexión', 'estatura', 'rostro', 'facciones']
+        clothing_keywords = ['túnica', 'vestimenta', 'manto', 'sandalias']
+        
+        physical_traits = []
+        clothing_traits = []
+        
+        dossier_lower = dossier.lower()
+        
+        for keyword in physical_keywords:
+            if keyword in dossier_lower:
+                # Buscar contexto alrededor de la palabra clave
+                import re
+                pattern = rf'.{{0,50}}{keyword}.{{0,50}}'
+                matches = re.findall(pattern, dossier_lower)
+                if matches:
+                    physical_traits.extend(matches)
+        
+        for keyword in clothing_keywords:
+            if keyword in dossier_lower:
+                pattern = rf'.{{0,50}}{keyword}.{{0,50}}'
+                matches = re.findall(pattern, dossier_lower)
+                if matches:
+                    clothing_traits.extend(matches)
+        
+        # Construir descripción genérica
+        base_description = f"Personaje en etapa de {age_stage}"
+        
+        if physical_traits:
+            base_description += f", con {', '.join(physical_traits[:2])}"
+        
+        if clothing_traits:
+            base_description += f", vistiendo {', '.join(clothing_traits[:2])}"
+        
+        return base_description
+
+    def _should_use_character_dossier(self, project_info: Dict) -> bool:
+        """
+        Determina si un proyecto debería usar el sistema de dossier de personaje
+        para mantener coherencia visual.
+        
+        Args:
+            project_info: Información del proyecto
+            
+        Returns:
+            bool: True si debe usar dossier, False caso contrario
+        """
+        titulo = project_info.get("titulo", "").lower().strip()
+        contexto = project_info.get("contexto", "").lower().strip()
+        
+        # Palabras clave que indican contenido biográfico/histórico con personaje principal
+        biographical_keywords = [
+            "vida de", "biografía", "historia de", "san ", "santa ", "santo ",
+            "napoleon", "alejandro", "cesar", "cleopatra", "martin luther",
+            "teresa", "ignacio", "francisco", "juan", "maría", "josé",
+            "mártir", "santo", "beato", "venerable"
+        ]
+        
+        historical_keywords = [
+            "histórico", "historia", "biografía", "documental biográfico",
+            "personaje histórico", "figura histórica"
+        ]
+        
+        # Verificar si el título o contexto sugieren contenido biográfico
+        for keyword in biographical_keywords + historical_keywords:
+            if keyword in titulo or keyword in contexto:
+                logger.info(f"🎭 Dossier requerido - Keyword detectada: '{keyword}'")
+                return True
+        
+        # Verificar si ya usa prompt histórico (muy probable que necesite dossier)
+        if self._should_use_historical_prompt(titulo):
+            logger.info("🎭 Dossier requerido - Proyecto usa prompt histórico")
+            return True
+        
+        logger.info("🎭 Dossier NO requerido - Proyecto no parece biográfico/histórico")
+        return False

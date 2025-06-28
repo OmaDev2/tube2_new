@@ -1,14 +1,48 @@
 from moviepy.editor import VideoClip, ImageClip, CompositeVideoClip
 import numpy as np
 from PIL import Image
+import math
 
 class EfectosVideo:
+    @staticmethod
+    def _ease_in_out(t):
+        """
+        Función de easing ease-in-out para movimientos suaves.
+        Acelera gradualmente al inicio, mantiene velocidad, luego desacelera al final.
+        """
+        if t < 0.5:
+            return 2 * t * t
+        else:
+            return -1 + (4 - 2 * t) * t
+    
+    @staticmethod
+    def _ease_out(t):
+        """
+        Función de easing ease-out para movimientos suaves.
+        Empieza rápido y desacelera gradualmente.
+        """
+        return 1 - (1 - t) * (1 - t)
+    
+    @staticmethod
+    def _ease_in(t):
+        """
+        Función de easing ease-in para movimientos suaves.
+        Acelera gradualmente desde el reposo.
+        """
+        return t * t
+    
+    @staticmethod
+    def _ease_smooth(t):
+        """
+        Función de easing suave usando coseno para movimientos muy fluidos.
+        """
+        return 0.5 * (1 - math.cos(math.pi * t))
     @staticmethod
     def zoom_in(clip, duration=1.0, zoom_factor=1.5):
         """Aplica un efecto de zoom in continuo al clip"""
         def make_frame(t):
-            # Calcula el zoom basado en el tiempo actual
-            progress = t / clip.duration
+            # Calcula el zoom basado en el tiempo actual (CON EASING SUAVE)
+            progress = EfectosVideo._ease_smooth(t / clip.duration)
             zoom = 1 + (zoom_factor - 1) * progress
             frame = clip.get_frame(t)
             h, w = frame.shape[:2]
@@ -26,8 +60,8 @@ class EfectosVideo:
     def zoom_out(clip, duration=1.0, zoom_factor=1.5):
         """Aplica un efecto de zoom out continuo al clip"""
         def make_frame(t):
-            # Calcula el zoom basado en el tiempo actual
-            progress = t / clip.duration
+            # Calcula el zoom basado en el tiempo actual (CON EASING SUAVE)
+            progress = EfectosVideo._ease_smooth(t / clip.duration)
             zoom = zoom_factor - (zoom_factor - 1) * progress
             frame = clip.get_frame(t)
             h, w = frame.shape[:2]
@@ -45,7 +79,12 @@ class EfectosVideo:
     def pan_left(clip, duration=1.0, zoom_factor=1.2, distance=0.2):
         """
         Aplica un efecto de paneo a la izquierda (movimiento de la cámara a la izquierda).
-        La imagen se mueve de izquierda a derecha en la pantalla.
+        La imagen se mueve de izquierda a derecha en la pantalla durante TODA la duración de la imagen.
+        
+        Args:
+            duration: Parámetro legacy (no se usa, el paneo recorre toda la duración del clip)
+            zoom_factor: Factor de zoom para crear margen de paneo
+            distance: Parámetro legacy (no se usa actualmente)
         """
         def make_frame(t):
             frame = clip.get_frame(t)
@@ -55,8 +94,8 @@ class EfectosVideo:
             new_h = int(h / zoom_factor)
             new_w = int(w / zoom_factor)
 
-            # El progreso del paneo
-            progress = t / clip.duration
+            # El progreso del paneo (RECORRE TODA LA DURACIÓN DE LA IMAGEN)
+            progress = EfectosVideo._ease_smooth(t / clip.duration)
             
             # El paneo va desde el borde derecho al centro
             start_x_max = w - new_w
@@ -86,8 +125,8 @@ class EfectosVideo:
             new_h = int(h / zoom_factor)
             new_w = int(w / zoom_factor)
 
-            # Progreso del paneo
-            progress = t / clip.duration
+            # Progreso del paneo (CON EASING SUAVE)
+            progress = EfectosVideo._ease_smooth(t / clip.duration)
 
             # El paneo va desde el centro hacia el borde izquierdo
             start_x_min = 0
@@ -117,8 +156,8 @@ class EfectosVideo:
             new_h = int(h / zoom_factor)
             new_w = int(w / zoom_factor)
 
-            # Progreso del paneo
-            progress = t / clip.duration
+            # Progreso del paneo (CON EASING SUAVE)
+            progress = EfectosVideo._ease_smooth(t / clip.duration)
 
             # El paneo va desde el borde superior al centro
             start_y_min = 0
@@ -148,8 +187,8 @@ class EfectosVideo:
             new_h = int(h / zoom_factor)
             new_w = int(w / zoom_factor)
 
-            # Progreso del paneo
-            progress = t / clip.duration
+            # Progreso del paneo (CON EASING SUAVE)
+            progress = EfectosVideo._ease_smooth(t / clip.duration)
 
             # El paneo va desde el borde inferior al centro
             start_y_max = h - new_h
@@ -224,8 +263,8 @@ class EfectosVideo:
             frame = clip.get_frame(t)
             h, w = frame.shape[:2]
 
-            # Interpolar linealmente el zoom y el paneo
-            progress = t / duration
+            # Interpolar SUAVEMENTE el zoom y el paneo (CON EASING)
+            progress = EfectosVideo._ease_smooth(t / duration)
             current_zoom = zoom_start + (zoom_end - zoom_start) * progress
             current_pan_x = pan_start[0] + (pan_end[0] - pan_start[0]) * progress
             current_pan_y = pan_start[1] + (pan_end[1] - pan_start[1]) * progress
