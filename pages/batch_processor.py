@@ -711,7 +711,6 @@ def show_batch_processor():
                 st.write("**🎵 Audio:**")
                 if audio_config.get('bg_music_selection'):
                     try:
-                        from pathlib import Path
                         music_name = Path(audio_config['bg_music_selection']).name
                     except:
                         music_name = audio_config['bg_music_selection']
@@ -1023,7 +1022,6 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
                 try:
                     # Importar y usar DatabaseManager para actualizar estado
                     import sys
-                    from pathlib import Path
                     project_root = Path(__file__).resolve().parent.parent
                     if str(project_root) not in sys.path:
                         sys.path.append(str(project_root))

@@ -172,57 +172,298 @@ class SceneGenerator:
 
     def _create_semantic_scenes(self, transcription_segments: List[Dict], target_duration: float = 12.0) -> List[Dict]:
         """
-        Crea escenas semánticamente coherentes basadas en la transcripción.
-        Agrupa segmentos por frases completas y duración objetivo.
+        Crea escenas semánticamente coherentes con subdivisión inteligente.
+        
+        LÓGICA:
+        1. Detecta unidades narrativas completas
+        2. Si unidad > 20-25s → subdividir en momentos visuales de 10-12s
+        3. Mantiene sincronización exacta con audio
         """
         if not transcription_segments:
             return []
         
-        scenes = []
-        current_scene_text = []
-        current_scene_start = transcription_segments[0]['start']
-        current_scene_duration = 0.0
+        # PARÁMETROS AJUSTADOS
+        MAX_NARRATIVE_UNIT = 20.0  # Máximo para unidad narrativa (20-25s límite)
+        TARGET_IMAGE_DURATION = 11.0  # Duración ideal por imagen (10-12s)
+        MAX_IMAGE_DURATION = 15.0   # Máximo absoluto por imagen
+        MIN_NARRATIVE_DURATION = 8.0  # Mínimo para considerar subdivisión
         
-        logger.info(f"Creando escenas semánticas con duración objetivo: {target_duration:.1f}s")
+        logger.info(f"Creando escenas con subdivisión inteligente:")
+        logger.info(f"  • Unidad narrativa máxima: {MAX_NARRATIVE_UNIT}s")
+        logger.info(f"  • Duración objetivo por imagen: {TARGET_IMAGE_DURATION}s")
+        logger.info(f"  • Duración máxima por imagen: {MAX_IMAGE_DURATION}s")
+        
+        # PASO 1: Detectar unidades narrativas completas
+        narrative_units = self._detect_narrative_units(transcription_segments, MAX_NARRATIVE_UNIT)
+        
+        # PASO 2: Procesar cada unidad narrativa
+        final_scenes = []
+        
+        for unit_idx, unit in enumerate(narrative_units):
+            unit_duration = unit['duration']
+            unit_text = unit['text']
+            
+            logger.info(f"Unidad {unit_idx+1}: {unit_duration:.1f}s - {unit_text[:60]}...")
+            
+            # Si la unidad es corta, usar como una sola escena
+            if unit_duration <= MAX_NARRATIVE_UNIT:
+                final_scenes.append({
+                    "index": len(final_scenes),
+                    "text": unit_text,
+                    "start": unit['start'],
+                    "end": unit['end'],
+                    "duration": unit_duration,
+                    "narrative_unit": unit_idx + 1,
+                    "visual_moment": 1
+                })
+                logger.info(f"  → Escena única ({unit_duration:.1f}s)")
+            
+            else:
+                # Unidad larga: subdividir en momentos visuales
+                logger.info(f"  → Subdividiendo unidad larga ({unit_duration:.1f}s)")
+                visual_moments = self._create_visual_moments(unit, TARGET_IMAGE_DURATION, MAX_IMAGE_DURATION)
+                
+                for moment_idx, moment in enumerate(visual_moments):
+                    final_scenes.append({
+                        "index": len(final_scenes),
+                        "text": moment['text'],
+                        "start": moment['start'],
+                        "end": moment['end'],
+                        "duration": moment['duration'],
+                        "narrative_unit": unit_idx + 1,
+                        "visual_moment": moment_idx + 1
+                    })
+                    logger.info(f"    • Momento {moment_idx+1}: {moment['duration']:.1f}s - {moment['text'][:50]}...")
+        
+        logger.info(f"Resultado final: {len(final_scenes)} escenas visuales de {len(narrative_units)} unidades narrativas")
+        return final_scenes
+
+    def _detect_narrative_units(self, transcription_segments: List[Dict], max_unit_duration: float) -> List[Dict]:
+        """
+        Detecta unidades narrativas completas que pueden durar más que una imagen individual.
+        Una unidad narrativa es una secuencia de eventos que deben mantenerse juntos conceptualmente.
+        """
+        if not transcription_segments:
+            return []
+        
+        units = []
+        current_unit_text = []
+        current_unit_start = transcription_segments[0]['start']
+        current_unit_duration = 0.0
+        
+        logger.info(f"Detectando unidades narrativas (máx: {max_unit_duration}s)...")
         
         for i, segment in enumerate(transcription_segments):
             segment_text = segment['text'].strip()
             segment_duration = segment['end'] - segment['start']
             
-            # Agregar segmento a la escena actual
-            current_scene_text.append(segment_text)
-            current_scene_duration += segment_duration
+            # Agregar segmento a la unidad actual
+            current_unit_text.append(segment_text)
+            current_unit_duration = segment['end'] - current_unit_start
             
-            # Determinar si es un buen momento para terminar la escena
-            is_sentence_end = segment_text.endswith(('.', '!', '?', ':', ';'))
-            is_long_enough = current_scene_duration >= target_duration * 0.8  # Al menos 80% del objetivo
-            is_too_long = current_scene_duration >= target_duration * 1.5     # Máximo 150% del objetivo
+            # Determinar si es momento de cerrar la unidad narrativa
+            is_narrative_break = self._is_strong_narrative_break(segment_text, current_unit_text)
+            is_too_long = current_unit_duration >= max_unit_duration
             is_last_segment = i == len(transcription_segments) - 1
             
-            # Finalizar escena si se cumple alguna condición
-            if (is_sentence_end and is_long_enough) or is_too_long or is_last_segment:
-                scene_text = " ".join(current_scene_text).strip()
-                scene_end = segment['end']
-                
-                if scene_text:  # Solo agregar si hay texto
-                    scenes.append({
-                        "index": len(scenes),
-                        "text": scene_text,
-                        "start": current_scene_start,
-                        "end": scene_end,
-                        "duration": current_scene_duration
+            should_close_unit = False
+            close_reason = ""
+            
+            if is_last_segment:
+                should_close_unit = True
+                close_reason = "último segmento"
+            elif is_too_long:
+                should_close_unit = True  
+                close_reason = f"duración máxima ({current_unit_duration:.1f}s)"
+            elif is_narrative_break and current_unit_duration >= 8.0:  # Solo si ya tiene contenido suficiente
+                should_close_unit = True
+                close_reason = "ruptura narrativa fuerte"
+            
+            if should_close_unit:
+                unit_text = " ".join(current_unit_text).strip()
+                if unit_text:
+                    units.append({
+                        "text": unit_text,
+                        "start": current_unit_start,
+                        "end": segment['end'],
+                        "duration": current_unit_duration,
+                        "segments_count": len(current_unit_text)
                     })
-                    
-                    logger.info(f"Escena {len(scenes)-1}: {current_scene_start:.1f}s-{scene_end:.1f}s ({current_scene_duration:.1f}s) - {scene_text[:50]}...")
+                    logger.debug(f"  Unidad {len(units)}: {current_unit_duration:.1f}s ({close_reason})")
                 
-                # Iniciar nueva escena (si no es el último segmento)
+                # Iniciar nueva unidad (si no es el último)
                 if not is_last_segment:
-                    current_scene_text = []
-                    current_scene_start = segment['end']
-                    current_scene_duration = 0.0
+                    current_unit_text = []
+                    current_unit_start = segment['end']
+                    current_unit_duration = 0.0
         
-        logger.info(f"Creadas {len(scenes)} escenas semánticas que cubren desde {scenes[0]['start']:.1f}s hasta {scenes[-1]['end']:.1f}s")
-        return scenes
+        logger.info(f"Detectadas {len(units)} unidades narrativas")
+        return units
+
+    def _is_strong_narrative_break(self, current_segment: str, unit_text_so_far: List[str]) -> bool:
+        """
+        Detecta rupturas narrativas FUERTES que justifican cerrar una unidad narrativa completa.
+        Más estricto que _is_narrative_break para evitar cortes prematuros.
+        """
+        if not unit_text_so_far or len(unit_text_so_far) < 3:  # Necesita al menos 3 segmentos
+            return False
+            
+        current_text = current_segment.lower().strip()
+        
+        # INDICADORES DE RUPTURA NARRATIVA FUERTE
+        strong_break_indicators = [
+            # Cambios temporales grandes
+            "años después", "tiempo después", "más tarde", "al día siguiente",
+            "en otra ocasión", "posteriormente", "tiempo más tarde",
+            
+            # Cambios de escenario grandes  
+            "en otro lugar", "en otra ciudad", "mientras tanto en",
+            "en una ciudad diferente", "lejos de allí",
+            
+            # Nuevas secuencias narrativas
+            "la historia continúa", "ahora", "por otro lado", "sin embargo",
+            "pero la historia", "mientras esto ocurría",
+            
+            # Transiciones de biografía/narración
+            "la vida de", "su biografía", "su historia", "el relato",
+            "imagina que", "transportémonos", "veamos ahora",
+            
+            # Conclusiones/cierres
+            "finalmente", "en conclusión", "para terminar", "cerramos",
+            "el resultado", "así fue como"
+        ]
+        
+        # INDICADORES DE CONTINUIDAD FUERTE (previenen corte)
+        strong_continuity_indicators = [
+            # Acciones físicas en progreso
+            "sujeta en sus brazos", "llevaba en brazos", "caminaba con",
+            "mientras caminaba", "al mismo tiempo", "en ese momento",
+            
+            # Secuencias de diálogo
+            "le dijo", "respondió", "preguntó", "exclamó", "murmuró",
+            "entonces él", "entonces ella", "luego añadió",
+            
+            # Descripciones físicas continuas
+            "su rostro", "sus manos", "sus ojos", "su cuerpo",
+            "golpeando", "respirando", "llorando", "gritando"
+        ]
+        
+        # Verificar continuidad fuerte
+        has_strong_continuity = any(indicator in current_text for indicator in strong_continuity_indicators)
+        
+        # Verificar ruptura fuerte
+        has_strong_break = any(indicator in current_text for indicator in strong_break_indicators)
+        
+        # DECISIÓN: Solo romper si hay ruptura fuerte Y no hay continuidad fuerte
+        if has_strong_continuity:
+            logger.debug(f"    🔗 Continuidad fuerte detectada - NO romper unidad")
+            return False
+        elif has_strong_break:
+            logger.debug(f"    ✂️ Ruptura fuerte detectada - Cerrar unidad narrativa")
+            return True
+        else:
+            logger.debug(f"    ➡️ Sin indicadores fuertes - Continuar unidad")
+            return False
+
+    def _create_visual_moments(self, narrative_unit: Dict, target_duration: float, max_duration: float) -> List[Dict]:
+        """
+        Subdivide una unidad narrativa larga en momentos visuales de duración apropiada.
+        Mantiene coherencia semántica mientras respeta límites de duración.
+        """
+        unit_text = narrative_unit['text']
+        unit_start = narrative_unit['start']
+        unit_end = narrative_unit['end']
+        unit_duration = narrative_unit['duration']
+        
+        # Calcular número óptimo de momentos visuales
+        num_moments = max(2, round(unit_duration / target_duration))
+        moment_duration = unit_duration / num_moments
+        
+        # Ajustar si los momentos quedan demasiado largos
+        if moment_duration > max_duration:
+            num_moments = int(unit_duration / max_duration) + 1
+            moment_duration = unit_duration / num_moments
+        
+        logger.info(f"    Subdividiendo en {num_moments} momentos de ~{moment_duration:.1f}s cada uno")
+        
+        # Dividir el texto en frases/segmentos lógicos
+        sentences = self._split_into_logical_segments(unit_text)
+        
+        # Distribuir frases entre momentos
+        moments = []
+        sentences_per_moment = max(1, len(sentences) // num_moments)
+        
+        for moment_idx in range(num_moments):
+            start_idx = moment_idx * sentences_per_moment
+            
+            # Para el último momento, incluir todas las frases restantes
+            if moment_idx == num_moments - 1:
+                end_idx = len(sentences)
+            else:
+                end_idx = (moment_idx + 1) * sentences_per_moment
+            
+            moment_sentences = sentences[start_idx:end_idx]
+            moment_text = " ".join(moment_sentences).strip()
+            
+            # Calcular tiempos basados en proporción
+            moment_start = unit_start + (moment_idx * moment_duration)
+            moment_end = unit_start + ((moment_idx + 1) * moment_duration)
+            
+            # Ajustar el último momento para que termine exactamente con la unidad
+            if moment_idx == num_moments - 1:
+                moment_end = unit_end
+            
+            actual_duration = moment_end - moment_start
+            
+            if moment_text:  # Solo agregar si hay texto
+                moments.append({
+                    "text": self._enhance_visual_moment_text(moment_text, moment_idx + 1, num_moments),
+                    "start": moment_start,
+                    "end": moment_end,
+                    "duration": actual_duration
+                })
+        
+        return moments
+
+    def _split_into_logical_segments(self, text: str) -> List[str]:
+        """
+        Divide el texto en segmentos lógicos para distribuir entre momentos visuales.
+        """
+        import re
+        
+        # Dividir por puntos, pero mantener frases completas
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        # Limpiar y filtrar
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        # Si hay muy pocas frases, dividir por comas
+        if len(sentences) < 3:
+            segments = re.split(r',\s+', text)
+            sentences = [s.strip() for s in segments if s.strip()]
+        
+        return sentences
+
+    def _enhance_visual_moment_text(self, text: str, moment_num: int, total_moments: int) -> str:
+        """
+        Mejora el texto del momento visual para generar mejores prompts de imagen.
+        Agrega contexto visual específico según la posición en la secuencia.
+        """
+        # Agregar descriptores visuales según la posición
+        if moment_num == 1 and total_moments > 1:
+            # Primer momento: establecer escena
+            if "madre" in text.lower():
+                text += " [Enfoque inicial en la expresión de desesperación]"
+            elif "blas" in text.lower() and "camina" in text.lower():
+                text += " [Vista de apertura de la escena]"
+        elif moment_num == total_moments and total_moments > 1:
+            # Último momento: momento culminante
+            if "niño" in text.lower() or "hijo" in text.lower():
+                text += " [Close-up del momento crítico]"
+            elif "milagro" in text.lower() or "sanó" in text.lower():
+                text += " [Momento climático de la curación]"
+        
+        return text
 
     def _align_paragraphs_to_transcription(self, paragraphs: List[str], transcription_segments: List[Dict]) -> List[Dict]:
         """
@@ -823,7 +1064,6 @@ class SceneGenerator:
         
         # Cargar el prompt histórico desde el archivo
         try:
-            from pathlib import Path
             import json
             
             prompts_file = Path(__file__).parent.parent / "prompts" / "imagenes_prompts.json"

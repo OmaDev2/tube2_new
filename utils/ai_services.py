@@ -440,7 +440,7 @@ def extract_historical_context(titulo: str, contexto: str, provider: str = "gemi
         model: Modelo específico a usar
         
     Returns:
-        Dict con las claves: periodo_historico, ubicacion, contexto_cultural
+        Dict con las claves: periodo_historico, ubicacion, contexto_cultural, edad_personaje, fecha_nacimiento, fecha_muerte
     """
     
     system_prompt = """Eres un experto historiador y analista de contenido histórico.
@@ -449,19 +449,43 @@ Tu tarea es analizar un título y contexto de contenido histórico y extraer inf
 1. PERÍODO HISTÓRICO: Fechas específicas, era, época (ej: "Siglo IV d.C., Imperio Romano tardío")
 2. UBICACIÓN GEOGRÁFICA: Lugar específico, región, país de la época (ej: "Sebastea, Armenia histórica")  
 3. CONTEXTO CULTURAL: Situación religiosa, política, social de la época (ej: "Cristianismo primitivo bajo persecución")
+4. FECHA_NACIMIENTO: Año de nacimiento del personaje principal (ej: "280" para San Blas, "1769" para Napoleón)
+5. FECHA_MUERTE: Año de muerte del personaje principal (ej: "316" para San Blas, "1821" para Napoleón)
+6. EDAD_PERSONAJE: Edad más representativa del personaje principal (ej: "30" para un santo médico, "45" para Santa Teresa reformadora, "35" para un líder militar)
+
+INSTRUCCIONES PARA FECHAS:
+- Para personajes históricos conocidos: usa fechas documentadas
+- Para figuras antiguas: usa estimaciones académicas aceptadas
+- Para fechas aproximadas: usa el año central del rango (ej: si vivió 280-320, usa 280 y 320)
+- Si no hay datos: usa "desconocido"
+
+INSTRUCCIONES PARA EDAD (edad más representativa para imágenes):
+IMPORTANTE: La edad debe representar al personaje en su momento más icónico/productivo, NO su edad de muerte.
+- Santos médicos: 25-35 años (durante su práctica médica activa, antes de vejez)
+- Santos mártires: edad del martirio específico, NO edad de muerte natural
+- Santos fundadores/reformadores: 35-50 años (durante máxima actividad fundacional)
+- Santos escritores/místicos: 40-50 años (período de obras principales)
+- Líderes políticos/militares: 30-45 años (apogeo de poder, no vejez)
+- Artistas/científicos: 35-50 años (período de obras maestras)
+- Reyes/emperadores: 30-40 años (reinado más significativo)
+- Para personajes con vida muy larga: NUNCA uses edad de muerte si es vejez
+- Si hay duda: elige edad entre 30-45 años (período más productivo/reconocible)
 
 INSTRUCCIONES:
 - Sé específico y preciso históricamente
 - Usa terminología académica apropiada
 - Si hay múltiples períodos/lugares, enfócate en el principal
-- Si falta información, usa "Información no especificada" pero intenta inferir del contexto
+- Si falta información, usa "Información no especificada" o "desconocido" pero intenta inferir del contexto
 - Responde SOLO en formato JSON válido
 
 FORMATO DE RESPUESTA:
 {
     "periodo_historico": "...",
     "ubicacion": "...",
-    "contexto_cultural": "..."
+    "contexto_cultural": "...",
+    "fecha_nacimiento": "año o desconocido",
+    "fecha_muerte": "año o desconocido",
+    "edad_personaje": "número"
 }"""
 
     user_prompt = f"""Analiza este contenido histórico y extrae la información solicitada:
@@ -470,7 +494,7 @@ TÍTULO: {titulo}
 
 CONTEXTO/DESCRIPCIÓN: {contexto}
 
-Extrae el período histórico, ubicación geográfica y contexto cultural específicos. Responde en formato JSON."""
+Extrae el período histórico, ubicación geográfica, contexto cultural, fechas de nacimiento y muerte, Y la edad más representativa del personaje principal. Responde en formato JSON."""
 
     try:
         ai_services = AIServices()
@@ -492,7 +516,7 @@ Extrae el período histórico, ubicación geográfica y contexto cultural espec�
             historical_data = json.loads(response)
             
             # Validar que tenga las claves esperadas
-            required_keys = ["periodo_historico", "ubicacion", "contexto_cultural"]
+            required_keys = ["periodo_historico", "ubicacion", "contexto_cultural", "fecha_nacimiento", "fecha_muerte", "edad_personaje"]
             if all(key in historical_data for key in required_keys):
                 logger.info(f"Contexto histórico extraído exitosamente para: {titulo}")
                 return historical_data
@@ -514,5 +538,8 @@ def _get_fallback_historical_context() -> Dict[str, str]:
     return {
         "periodo_historico": "Información no especificada - verificar manualmente",
         "ubicacion": "Información no especificada - verificar manualmente", 
-        "contexto_cultural": "Información no especificada - verificar manualmente"
+        "contexto_cultural": "Información no especificada - verificar manualmente",
+        "fecha_nacimiento": "desconocido",
+        "fecha_muerte": "desconocido",
+        "edad_personaje": "30"
     }
