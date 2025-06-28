@@ -362,6 +362,30 @@ class SceneGenerator:
     def generate_prompts_for_scenes(self, scenes: List[Dict], project_info: Dict, image_prompt_config: Dict, ai_service: AIServices) -> List[Dict]:
         """Genera prompts para las escenas con sistema de fallback robusto."""
         
+        # 🔍 DEBUG INICIAL - CONFIGURACIÓN RECIBIDA
+        logger.info("=" * 100)
+        logger.info("🔍 DEBUG COMPLETO - INICIANDO GENERACIÓN DE PROMPTS")
+        logger.info("=" * 100)
+        logger.info(f"📊 Proyecto: {project_info.get('titulo', 'Sin título')}")
+        logger.info(f"📊 Total de escenas: {len(scenes)}")
+        logger.info(f"📊 Configuración inicial recibida:")
+        logger.info(f"  • prompt_obj inicial: {image_prompt_config.get('prompt_obj', {}).get('nombre', 'No definido')}")
+        logger.info(f"  • historical_variables inicial: {image_prompt_config.get('historical_variables', 'No definidas')}")
+        logger.info(f"  • providers: {image_prompt_config.get('img_prompt_providers_priority', ['gemini'])}")
+        
+        # 🏛️ DETECCIÓN AUTOMÁTICA DE CONTEXTO HISTÓRICO
+        logger.info("🏛️ Ejecutando detección automática de contexto histórico...")
+        original_config = image_prompt_config.copy()
+        image_prompt_config = self._force_historical_prompt_if_needed(project_info, image_prompt_config)
+        
+        # DEBUG: Mostrar si cambió la configuración
+        if original_config != image_prompt_config:
+            logger.info("✅ Configuración modificada por detección automática")
+            logger.info(f"  • Prompt nuevo: {image_prompt_config.get('prompt_obj', {}).get('nombre', 'No definido')}")
+            logger.info(f"  • Variables históricas aplicadas: {list(image_prompt_config.get('historical_variables', {}).keys())}")
+        else:
+            logger.info("ℹ️ Configuración no modificada (ya era correcta o no aplicable)")
+        
         # VERIFICACIÓN CRÍTICA DEL AI_SERVICE
         if not ai_service:
             logger.error("🚨 ai_service es None! No se pueden generar prompts de imagen.")
@@ -372,10 +396,12 @@ class SceneGenerator:
         prompt_obj = image_prompt_config.get('prompt_obj')
         provider_priority_list = image_prompt_config.get('img_prompt_providers_priority', ['gemini'])
         
-        logger.info(f"🔍 DEBUG - Configuración recibida:")
-        logger.info(f"  - prompt_obj: {prompt_obj.get('nombre', 'Sin nombre') if prompt_obj else 'None'}")
-        logger.info(f"  - provider_priority_list: {provider_priority_list}")
-        logger.info(f"  - ai_service disponible: {ai_service is not None}")
+        logger.info(f"🔍 CONFIGURACIÓN FINAL PARA GENERACIÓN:")
+        logger.info(f"  • prompt_obj: {prompt_obj.get('nombre', 'Sin nombre') if prompt_obj else 'None'}")
+        logger.info(f"  • provider_priority_list: {provider_priority_list}")
+        logger.info(f"  • ai_service disponible: {ai_service is not None}")
+        logger.info(f"  • variables históricas finales: {image_prompt_config.get('historical_variables', {})}")
+        logger.info("=" * 100)
         
         if not prompt_obj:
             logger.warning("No se proporcionó plantilla de prompt. Usando fallback simple.")
@@ -398,8 +424,42 @@ class SceneGenerator:
             # 🏛️ AÑADIR VARIABLES HISTÓRICAS SI ESTÁN DISPONIBLES
             historical_variables = image_prompt_config.get('historical_variables', {})
             if historical_variables:
-                template_variables.update(historical_variables)
-                logger.info(f"[Escena {i+1}] 🏛️ Variables históricas añadidas: {list(historical_variables.keys())}")
+                # 🔧 VALIDAR VARIABLES HISTÓRICAS - detectar si están vacías y usar detección automática como fallback
+                valid_historical_vars = {}
+                empty_vars = []
+                
+                for key, value in historical_variables.items():
+                    if value and str(value).strip():  # Variable tiene contenido
+                        valid_historical_vars[key] = value
+                    else:  # Variable vacía
+                        empty_vars.append(key)
+                
+                if valid_historical_vars:
+                    template_variables.update(valid_historical_vars)
+                    logger.info(f"[Escena {i+1}] 🏛️ Variables históricas válidas añadidas: {list(valid_historical_vars.keys())}")
+                
+                if empty_vars:
+                    logger.warning(f"[Escena {i+1}] ⚠️ Variables históricas vacías detectadas: {empty_vars}")
+                    logger.info(f"[Escena {i+1}] 🤖 Aplicando detección automática para variables faltantes...")
+                    
+                    # Detectar contexto automáticamente para variables faltantes
+                    titulo = project_info.get("titulo", "")
+                    auto_context = self._detect_historical_context_from_title(titulo)
+                    
+                    # Solo usar las variables automáticas que estaban vacías
+                    filled_vars = []
+                    for var in empty_vars:
+                        if var in auto_context and auto_context[var]:
+                            template_variables[var] = auto_context[var]
+                            filled_vars.append(var)
+                            logger.info(f"[Escena {i+1}] 🤖 Variable '{var}' completada automáticamente")
+                    
+                    if filled_vars:
+                        logger.info(f"[Escena {i+1}] ✅ Variables completadas automáticamente: {filled_vars}")
+                    else:
+                        logger.warning(f"[Escena {i+1}] ❌ No se pudieron completar automáticamente las variables vacías")
+            else:
+                logger.debug(f"[Escena {i+1}] No hay variables históricas disponibles")
             
             # Obtener las variables requeridas por la plantilla
             template_vars_required = prompt_obj.get('variables', [])
@@ -425,11 +485,32 @@ class SceneGenerator:
             
             generated_prompt = None
             
-            # LOGGING DETALLADO PARA DEBUG
-            logger.info(f"[Escena {i+1}] 🔍 DEBUG - Iniciando generación de prompt")
-            logger.info(f"[Escena {i+1}] 🔍 DEBUG - Proveedores disponibles: {provider_priority_list}")
-            logger.info(f"[Escena {i+1}] 🔍 DEBUG - Variables filtradas: {filtered_variables}")
-            logger.info(f"[Escena {i+1}] 🔍 DEBUG - User prompt generado: {user_prompt[:200]}...")
+            # 🔍 DEBUG COMPLETO DEL PROMPT
+            logger.info(f"[Escena {i+1}] =" * 80)
+            logger.info(f"[Escena {i+1}] 🔍 DEBUG COMPLETO - GENERACIÓN DE PROMPT")
+            logger.info(f"[Escena {i+1}] =" * 80)
+            logger.info(f"[Escena {i+1}] 📋 Prompt template: {prompt_obj.get('nombre', 'Sin nombre')}")
+            logger.info(f"[Escena {i+1}] 🔧 Proveedores disponibles: {provider_priority_list}")
+            logger.info(f"[Escena {i+1}] 📊 Variables del template requeridas: {template_vars_required}")
+            logger.info(f"[Escena {i+1}] ✅ Variables filtradas disponibles: {list(filtered_variables.keys())}")
+            logger.info(f"[Escena {i+1}] 🏛️ Variables históricas pasadas: {historical_variables}")
+            
+            # DEBUG: Mostrar cada variable y su valor
+            logger.info(f"[Escena {i+1}] 📝 VALORES DE VARIABLES:")
+            for var_name, var_value in filtered_variables.items():
+                logger.info(f"[Escena {i+1}]   • {var_name}: '{var_value[:100]}{'...' if len(str(var_value)) > 100 else ''}'")
+            
+            # DEBUG: Mostrar el system prompt completo
+            logger.info(f"[Escena {i+1}] 🤖 SYSTEM PROMPT ENVIADO A GEMINI:")
+            logger.info(f"[Escena {i+1}] {'-' * 60}")
+            logger.info(f"[Escena {i+1}] {system_prompt}")
+            logger.info(f"[Escena {i+1}] {'-' * 60}")
+            
+            # DEBUG: Mostrar el user prompt completo
+            logger.info(f"[Escena {i+1}] 👤 USER PROMPT ENVIADO A GEMINI:")
+            logger.info(f"[Escena {i+1}] {'-' * 60}")
+            logger.info(f"[Escena {i+1}] {user_prompt}")
+            logger.info(f"[Escena {i+1}] {'-' * 60}")
             
             for provider in provider_priority_list:
                 try:
@@ -451,6 +532,13 @@ class SceneGenerator:
                     logger.info(f"[Escena {i+1}] 🔍 DEBUG - Usando modelo: {model}")
                     logger.info(f"[Escena {i+1}] 🔍 DEBUG - Llamando ai_service.generate_content...")
                     
+                    # Añadir delay entre requests para evitar rate limits
+                    if i > 0 and provider == "gemini":
+                        delay = 0.5  # 500ms entre requests de Gemini
+                        logger.info(f"[Escena {i+1}] ⏱️ Delay de {delay}s para evitar rate limits...")
+                        import time
+                        time.sleep(delay)
+                    
                     generated_text = ai_service.generate_content(
                         provider=provider, 
                         model=model, 
@@ -458,14 +546,30 @@ class SceneGenerator:
                         user_prompt=user_prompt
                     )
                     
-                    logger.info(f"[Escena {i+1}] 🔍 DEBUG - Respuesta recibida: {type(generated_text)} - {str(generated_text)[:100] if generated_text else 'None'}...")
+                    # 🔍 DEBUG COMPLETO DE LA RESPUESTA
+                    logger.info(f"[Escena {i+1}] 🤖 RESPUESTA COMPLETA DE {provider.upper()}:")
+                    logger.info(f"[Escena {i+1}] {'=' * 60}")
+                    logger.info(f"[Escena {i+1}] Tipo: {type(generated_text)}")
+                    logger.info(f"[Escena {i+1}] Longitud: {len(str(generated_text)) if generated_text else 0} caracteres")
+                    logger.info(f"[Escena {i+1}] Contenido completo:")
+                    logger.info(f"[Escena {i+1}] {'-' * 40}")
+                    if generated_text:
+                        # Mostrar respuesta completa con numeración de líneas
+                        lines = str(generated_text).split('\n')
+                        for line_num, line in enumerate(lines, 1):
+                            logger.info(f"[Escena {i+1}] {line_num:3d}: {line}")
+                    else:
+                        logger.info(f"[Escena {i+1}] [RESPUESTA VACÍA O NULA]")
+                    logger.info(f"[Escena {i+1}] {'-' * 40}")
+                    logger.info(f"[Escena {i+1}] {'=' * 60}")
                     
                     if generated_text and "[ERROR]" not in generated_text:
-                        logger.info(f"[Escena {i+1}] ✅ Éxito con {provider.upper()}. Texto generado: {generated_text[:100]}...")
+                        logger.info(f"[Escena {i+1}] ✅ ÉXITO con {provider.upper()}")
                         generated_prompt = generated_text.strip()
                         break
                     else:
-                        logger.warning(f"[Escena {i+1}] ⚠️ Fallo leve con {provider.upper()}. Texto generado (o vacío): {generated_text}. Intentando siguiente proveedor.")
+                        logger.warning(f"[Escena {i+1}] ❌ FALLO con {provider.upper()}")
+                        logger.warning(f"[Escena {i+1}] Motivo: {'Texto vacío o nulo' if not generated_text else 'Contiene [ERROR]'}")
                 except Exception as e:
                     logger.error(f"[Escena {i+1}] ❌ Fallo grave con {provider.upper()}: {e}. Intentando siguiente proveedor.")
             
@@ -599,3 +703,159 @@ class SceneGenerator:
             logger.error(f"Unexpected error saving scene data to {output_path}: {e}", exc_info=True)
         
         return str(output_path)
+
+    def _detect_historical_context_from_title(self, titulo: str) -> Dict[str, str]:
+        """
+        Detecta automáticamente el contexto histórico basado en el título del proyecto.
+        Retorna las variables históricas apropiadas.
+        """
+        titulo_lower = titulo.lower().strip()
+        
+        # DEBUG: Mostrar proceso de detección
+        logger.info(f"🔍 DEBUG - Detectando contexto histórico para: '{titulo}'")
+        logger.info(f"🔍 DEBUG - Título normalizado: '{titulo_lower}'")
+        
+        # Base de datos de contextos históricos conocidos
+        historical_contexts = {
+            "san blas": {
+                "periodo_historico": "Siglo IV d.C. (circa 280-316 d.C.), Imperio Romano tardío, era de las persecuciones cristianas bajo Diocleciano",
+                "ubicacion": "Sebastea, Armenia histórica (actual Sivas, Turquía), región montañosa del Asia Menor bajo dominio romano",
+                "contexto_cultural": "Cristianismo primitivo bajo persecución sistemática del emperador Diocleciano, comunidades cristianas clandestinas, tradición médica greco-romana, conflicto entre paganismo y cristianismo emergente"
+            },
+            "san blás": {
+                "periodo_historico": "Siglo IV d.C. (circa 280-316 d.C.), Imperio Romano tardío, era de las persecuciones cristianas bajo Diocleciano",
+                "ubicacion": "Sebastea, Armenia histórica (actual Sivas, Turquía), región montañosa del Asia Menor bajo dominio romano",
+                "contexto_cultural": "Cristianismo primitivo bajo persecución sistemática del emperador Diocleciano, comunidades cristianas clandestinas, tradición médica greco-romana, conflicto entre paganismo y cristianismo emergente"
+            },
+            "napoleon": {
+                "periodo_historico": "1796-1815, Era Napoleónica, Imperio Francés, Consulado y Primer Imperio",
+                "ubicacion": "Europa occidental y central, principalmente Francia, Austria, Prusia, Rusia, península ibérica",
+                "contexto_cultural": "Post-Revolución Francesa, nacionalismo europeo emergente, códigos napoleónicos, Ilustración tardía, guerras de coalición"
+            },
+            "maya": {
+                "periodo_historico": "800-900 d.C., Período Clásico Tardío Maya, colapso de las ciudades-estado",
+                "ubicacion": "Tierras bajas mayas: Petén guatemalteco, Yucatán, Belice, Chiapas, Honduras occidental",
+                "contexto_cultural": "Civilización maya clásica, sistema de ciudades-estado, escritura jeroglífica, astronomía avanzada, religión politeísta, colapso ambiental"
+            }
+        }
+        
+        logger.info(f"🔍 DEBUG - Contextos históricos disponibles: {list(historical_contexts.keys())}")
+        
+        # Buscar coincidencias en el título
+        for key, context in historical_contexts.items():
+            logger.info(f"🔍 DEBUG - Probando match con '{key}'")
+            if key in titulo_lower:
+                logger.info(f"✅ MATCH ENCONTRADO - Contexto histórico detectado para '{titulo}': '{key}'")
+                logger.info(f"✅ CONTEXTO APLICADO:")
+                logger.info(f"  • periodo_historico: {context['periodo_historico']}")
+                logger.info(f"  • ubicacion: {context['ubicacion']}")
+                logger.info(f"  • contexto_cultural: {context['contexto_cultural']}")
+                return context
+            else:
+                logger.debug(f"🔍 DEBUG - '{key}' no encontrado en '{titulo_lower}'")
+        
+        # Si no encuentra coincidencia, retornar contexto genérico
+        logger.warning(f"❌ NO MATCH - No se detectó contexto histórico específico para '{titulo}'. Usando contexto genérico.")
+        fallback_context = {
+            "periodo_historico": "Período histórico a determinar según el contenido",
+            "ubicacion": "Ubicación geográfica a determinar según el contexto",
+            "contexto_cultural": "Contexto cultural a determinar según la época y región"
+        }
+        logger.warning(f"⚠️ CONTEXTO GENÉRICO APLICADO: {fallback_context}")
+        return fallback_context
+
+    def _should_use_historical_prompt(self, titulo: str) -> bool:
+        """
+        Determina si un proyecto debería usar automáticamente el prompt histórico
+        basado en su título.
+        """
+        titulo_lower = titulo.lower().strip()
+        
+        # DEBUG: Mostrar título analizado
+        logger.info(f"🔍 DEBUG - Analizando título para detección histórica: '{titulo}'")
+        logger.info(f"🔍 DEBUG - Título normalizado: '{titulo_lower}'")
+        
+        # Palabras clave que indican contenido histórico/biográfico
+        historical_keywords = [
+            "san ", "santa ", "santo ",  # Santos
+            "napoleon", "alejandro", "cesar", "cleopatra",  # Figuras históricas
+            "maya", "azteca", "inca", "romano", "griego",  # Civilizaciones
+            "medieval", "renacimiento", "barroco",  # Períodos
+            "vida de", "biografía", "historia de"  # Indicadores biográficos
+        ]
+        
+        logger.info(f"🔍 DEBUG - Keywords históricos a buscar: {historical_keywords}")
+        
+        for keyword in historical_keywords:
+            if keyword in titulo_lower:
+                logger.info(f"✅ MATCH ENCONTRADO - Título '{titulo}' requiere prompt histórico (keyword: '{keyword}')")
+                return True
+            else:
+                logger.debug(f"🔍 DEBUG - Keyword '{keyword}' no encontrado en título")
+        
+        logger.info(f"❌ NO MATCH - Título '{titulo}' NO requiere prompt histórico automático")
+        return False
+
+    def _force_historical_prompt_if_needed(self, project_info: Dict, image_prompt_config: Dict) -> Dict:
+        """
+        Fuerza el uso del prompt histórico si el proyecto lo requiere,
+        incluso si no fue seleccionado manualmente.
+        """
+        titulo = project_info.get("titulo", "")
+        
+        if not self._should_use_historical_prompt(titulo):
+            return image_prompt_config
+        
+        # Verificar si ya está usando el prompt histórico
+        current_prompt = image_prompt_config.get("prompt_obj", {})
+        if current_prompt.get("nombre") == "Escenas Fotorrealistas Históricamente Precisas":
+            logger.info(f"🏛️ Proyecto '{titulo}' ya usa prompt histórico correcto")
+            
+            # 🔧 IMPORTANTE: Incluso si ya usa el prompt histórico, verificar que tenga variables históricas
+            if not image_prompt_config.get("historical_variables"):
+                logger.info(f"🏛️ Prompt histórico detectado pero sin variables históricas. Aplicando detección automática...")
+                historical_context = self._detect_historical_context_from_title(titulo)
+                new_config = image_prompt_config.copy()
+                new_config["historical_variables"] = historical_context
+                return new_config
+            
+            return image_prompt_config
+        
+        # Cargar el prompt histórico desde el archivo
+        try:
+            from pathlib import Path
+            import json
+            
+            prompts_file = Path(__file__).parent.parent / "prompts" / "imagenes_prompts.json"
+            with open(prompts_file, 'r', encoding='utf-8') as f:
+                all_prompts = json.load(f)
+            
+            # Buscar el prompt histórico
+            historical_prompt = None
+            for prompt in all_prompts:
+                if prompt.get("nombre") == "Escenas Fotorrealistas Históricamente Precisas":
+                    historical_prompt = prompt
+                    break
+            
+            if not historical_prompt:
+                logger.error("🚨 No se encontró el prompt histórico en imagenes_prompts.json")
+                return image_prompt_config
+            
+            # Detectar contexto histórico automáticamente
+            historical_context = self._detect_historical_context_from_title(titulo)
+            
+            # Crear nueva configuración con prompt histórico COMPLETO
+            new_config = image_prompt_config.copy()
+            new_config["prompt_obj"] = historical_prompt  # Configuración completa del archivo JSON
+            new_config["historical_variables"] = historical_context
+            
+            logger.info(f"🏛️ FORZANDO prompt histórico para '{titulo}'")
+            logger.info(f"🏛️ Prompt completo cargado: {historical_prompt.get('nombre')}")
+            logger.info(f"🏛️ Variables requeridas: {historical_prompt.get('variables', [])}")
+            logger.info(f"🏛️ Contexto aplicado: {historical_context}")
+            
+            return new_config
+            
+        except Exception as e:
+            logger.error(f"❌ Error forzando prompt histórico: {e}")
+            return image_prompt_config

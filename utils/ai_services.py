@@ -203,21 +203,52 @@ class AIServices:
     # --- Métodos Privados de Generación (por proveedor) ---
 
     def _generate_gemini_script(self, system_prompt: str, user_prompt: str, model: str) -> str:
-        # ... (resto de métodos privados sin cambios) ...
         if not self.gemini_key:
             return "[ERROR] Clave API Gemini no configurada."
-        try:
-            modelo = genai.GenerativeModel(model_name=model)
-            full_prompt = f"{system_prompt}\n\n---\n\n{user_prompt}" if system_prompt else user_prompt
-            response = modelo.generate_content(full_prompt)
-            if not response.parts:
-                feedback = getattr(response, 'prompt_feedback', None)
-                block_reason = getattr(feedback, 'block_reason', 'Desconocido') if feedback else 'Desconocido'
-                return f"[ERROR] Respuesta Gemini vacía o bloqueada. Razón: {block_reason}."
-            return response.text
-        except Exception as e:
-            logger.error(f"Error llamando a Gemini ({model}): {e}", exc_info=True)
-            return f"[ERROR] Error al llamar a Gemini ({model}): {e}"
+        
+        # Sistema de retry con backoff exponencial para rate limits
+        max_retries = 3
+        base_delay = 1.0  # segundos
+        
+        for attempt in range(max_retries):
+            try:
+                modelo = genai.GenerativeModel(model_name=model)
+                full_prompt = f"{system_prompt}\n\n---\n\n{user_prompt}" if system_prompt else user_prompt
+                
+                # Añadir delay progresivo para evitar rate limits
+                if attempt > 0:
+                    delay = base_delay * (2 ** (attempt - 1))  # 1s, 2s, 4s
+                    logger.info(f"Gemini retry {attempt + 1}/{max_retries}, esperando {delay}s...")
+                    time.sleep(delay)
+                
+                response = modelo.generate_content(full_prompt)
+                
+                if not response.parts:
+                    feedback = getattr(response, 'prompt_feedback', None)
+                    block_reason = getattr(feedback, 'block_reason', 'Desconocido') if feedback else 'Desconocido'
+                    return f"[ERROR] Respuesta Gemini vacía o bloqueada. Razón: {block_reason}."
+                
+                logger.info(f"Gemini éxito en intento {attempt + 1}")
+                return response.text
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Detectar rate limits específicos
+                if "rate limit" in error_msg or "quota" in error_msg or "429" in error_msg:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt) + 2  # Delay extra para rate limits
+                        logger.warning(f"Rate limit detectado en Gemini, reintentando en {delay}s... (intento {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Rate limit persistente en Gemini después de {max_retries} intentos")
+                        return f"[ERROR] Rate limit de Gemini excedido. Intenta más tarde o usa otro proveedor."
+                
+                # Otros errores - no reintentar
+                logger.error(f"Error llamando a Gemini ({model}) en intento {attempt + 1}: {e}", exc_info=True)
+                if attempt == max_retries - 1:
+                    return f"[ERROR] Error al llamar a Gemini ({model}): {e}"
 
     def _generate_openai_script(self, system_prompt: str, user_prompt: str, model: str) -> str:
         if not self.openai_client:

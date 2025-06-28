@@ -743,33 +743,37 @@ def show_batch_processor():
         
         # ===== VALIDACIONES ANTES DEL PROCESAMIENTO =====
         validaciones_faltantes = []
+        validaciones_recomendadas = []
+        continuar_sin_config = False  # Inicializar variable
         
-        # Verificar música de fondo
+        # Verificar música de fondo (recomendado, no obligatorio)
         if not audio_config.get('bg_music_selection'):
-            validaciones_faltantes.append("🎵 **Música de fondo**: No has seleccionado música de fondo")
+            validaciones_recomendadas.append("🎵 **Música de fondo**: No has seleccionado música de fondo")
         
-        # Verificar overlays
+        # Verificar overlays (recomendado, no obligatorio)
         overlays_configurados = video_config.get('overlays', [])
         if not overlays_configurados or len(overlays_configurados) == 0:
-            validaciones_faltantes.append("🖼️ **Overlays**: No has configurado ningún overlay")
+            validaciones_recomendadas.append("🖼️ **Overlays**: No has configurado ningún overlay")
         
-        # Verificar efectos (advertencia suave, no obligatorio)
+        # Verificar efectos (recomendado, no obligatorio)
         efectos_configurados = video_config.get('effects', [])
         if not efectos_configurados or len(efectos_configurados) == 0:
-            validaciones_faltantes.append("✨ **Efectos visuales**: No has configurado efectos visuales (opcional pero recomendado)")
+            validaciones_recomendadas.append("✨ **Efectos visuales**: No has configurado efectos visuales")
         
-        # Mostrar advertencias si faltan configuraciones
-        if validaciones_faltantes:
-            st.error("⚠️ **Configuraciones faltantes detectadas:**")
-            for validacion in validaciones_faltantes:
+        # Mostrar recomendaciones si faltan configuraciones (pero permitir continuar)
+        if validaciones_recomendadas:
+            st.warning("💡 **Configuraciones recomendadas faltantes:**")
+            for validacion in validaciones_recomendadas:
                 st.write(f"• {validacion}")
+            
+            st.info("ℹ️ **Puedes continuar sin estas configuraciones, pero se recomienda configurarlas para mejores resultados.**")
             
             st.markdown("---")
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("❌ Cancelar y Configurar", type="secondary", use_container_width=True):
-                    st.info("💡 **Sugerencias:**")
+                if st.button("⚙️ Configurar Antes de Continuar", type="secondary", use_container_width=True):
+                    st.info("💡 **Sugerencias para mejorar tus videos:**")
                     if not audio_config.get('bg_music_selection'):
                         st.write("• Ve a la sección **'🔊 Configuración de Audio'** y selecciona una música de fondo")
                     if not overlays_configurados:
@@ -779,11 +783,19 @@ def show_batch_processor():
                     return
             
             with col2:
-                continuar_sin_config = st.button("⚡ Continuar Sin Estas Configuraciones", type="primary", use_container_width=True)
+                continuar_sin_config = st.button("🚀 Continuar de Todas Formas", type="primary", use_container_width=True)
                 if not continuar_sin_config:
                     return
                 else:
-                    st.warning("⚠️ Continuando sin todas las configuraciones recomendadas...")
+                    st.success("✅ Continuando con la configuración actual...")
+        else:
+            st.success("✅ Todas las configuraciones recomendadas están presentes!")
+            # Si no hay configuraciones faltantes, procesar directamente
+            continuar_sin_config = True
+        
+        # Solo procesar si se confirmó continuar
+        if not continuar_sin_config:
+            return
         
         st.info("🔄 Iniciando procesamiento por lotes... Esto puede tardar varios minutos.")
         
