@@ -59,7 +59,7 @@ def show_effects_ui(key_prefix: str = ""):
         "Efectos (se aplicarán en orden)",
         list(efectos_disponibles.keys()),
         format_func=lambda x: efectos_disponibles[x],
-        default=["kenburns"],  # Ken Burns como efecto por defecto
+        default=["zoom_in", "zoom_out", "pan_right", "pan_left", "pan_up", "pan_down"],  # Efectos por defecto
         key=f"{key_prefix}efectos_secuencia"
     )
     

@@ -266,7 +266,7 @@ def show_batch_processor():
             try:
                 prompts_img_list = list_prompts("imagenes")
                 prompt_img_names = [p.get("nombre", f"Prompt Inválido {i}") for i, p in enumerate(prompts_img_list)]
-                default_img_prompt_name = "Imágenes Detalladas (Default)"
+                default_img_prompt_name = "Escenas Fotorrealistas Históricamente Precisas"
                 default_img_index = prompt_img_names.index(default_img_prompt_name) if default_img_prompt_name in prompt_img_names else 0
                 selected_prompt_img_name = st.selectbox("Plantilla de Imágenes", prompt_img_names, index=default_img_index, key="batch_image_prompt")
                 img_prompt_obj = next((p for p in prompts_img_list if p.get("nombre") == selected_prompt_img_name), None)
@@ -1167,7 +1167,7 @@ def _render_batch_audio_config(app_config):
     tts_provider = st.selectbox(
         "Proveedor TTS",
         ["Edge TTS", "Fish Audio"],
-        index=0,
+        index=1,  # Fish Audio por defecto
         key="batch_tts_provider",
         help="Edge TTS: Gratuito, voces de Microsoft. Fish Audio: Calidad premium, requiere API key."
     )

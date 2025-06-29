@@ -196,10 +196,10 @@ def _create_default_prompts(tipo: str) -> List[Dict]:
         }]
     elif tipo == "imagenes":
         return [{
-            "nombre": "Imágenes Detalladas (Default)",
-            "system_prompt": "Generate detailed image prompts in English for video scenes. Focus on high-quality visuals that match the video content.",
-            "user_prompt": "Create an image for this scene: {scene_text}. Video title: {titulo}. Context: {contexto}. Style: {style}.",
-            "variables": ["scene_text", "titulo", "contexto", "style"]
+            "nombre": "Escenas Fotorrealistas Históricamente Precisas",
+            "system_prompt": "Eres un experto en generación de prompts para imágenes fotorrealistas históricamente precisas.\nTu tarea es crear prompts detallados y descriptivos para generar imágenes hiperrealistas que representen fielmente períodos históricos específicos.\nDebes mantener la coherencia visual con el tema general del video mientras te enfocas en cada escena específica.\n\nIncluye siempre detalles sobre:\n- Personajes con características físicas apropiadas para la época y región\n- Vestimenta, peinados y accesorios históricamente auténticos\n- Arquitectura, objetos y herramientas de la época exacta\n- Ambiente y escenario con precisión geográfica e histórica\n- Iluminación natural y técnicas fotográficas realistas\n- Composición que respete las convenciones visuales del período\n- Evitar completamente elementos anacrónicos o modernos\n- Coherencia del personaje principal a través de todas las escenas\n\nEl prompt debe ser en inglés, históricamente preciso y técnicamente detallado para lograr máximo realismo histórico.",
+            "user_prompt": "Genera un prompt detallado para crear una imagen fotorrealista históricamente precisa que represente:\n\nCONTEXTO DEL VIDEO:\nTítulo: {titulo}\nTema general: {contexto}\nPERÍODO HISTÓRICO: {periodo_historico}\nUBICACIÓN GEOGRÁFICA: {ubicacion}\nCONTEXTO CULTURAL: {contexto_cultural}\n\nESCENA A REPRESENTAR:\n{scene_text}\n\nDESCRIPCIÓN DEL PERSONAJE PRINCIPAL (para coherencia visual):\n{character_description}\n\nCrea un prompt que:\n1. Respete completamente el período histórico especificado\n2. Incluya arquitectura, vestimenta y objetos auténticos de la época\n3. Mantenga coherencia cultural y geográfica\n4. Use la descripción del personaje para mantener consistencia visual entre escenas\n5. Use terminología fotográfica técnica precisa\n6. Evite cualquier elemento anacrónico o moderno\n7. Capture la esencia de la escena con máximo realismo histórico\n\nEl prompt debe ser en inglés y extremadamente detallado en aspectos históricos y de caracterización.",
+            "variables": ["contexto", "titulo", "scene_text", "periodo_historico", "ubicacion", "contexto_cultural", "character_description"]
         }]
     return []
 
