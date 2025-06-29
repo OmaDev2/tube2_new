@@ -1160,36 +1160,138 @@ def mostrar_resultados_batch(resultados):
 def _render_batch_audio_config(app_config):
     """Configuración de audio específica para batch (sin duplicaciones de UI)"""
     
-    # --- VOZ (TTS) ---
-    st.markdown("**🎤 Síntesis de Voz (EdgeTTS)**")
-    col_voz1, col_voz2, col_voz3, col_voz4 = st.columns(4)
+    # --- SELECCIÓN DE PROVEEDOR TTS ---
+    st.markdown("**🎤 Síntesis de Voz (TTS)**")
     
-    async def obtener_voces_es_tts():
-        voces = await edge_tts.list_voices()
-        return [(v['ShortName'], v['Name']) for v in voces if v['Locale'].startswith('es-')]
+    # Seleccionar proveedor TTS
+    tts_provider = st.selectbox(
+        "Proveedor TTS",
+        ["Edge TTS", "Fish Audio"],
+        index=0,
+        key="batch_tts_provider",
+        help="Edge TTS: Gratuito, voces de Microsoft. Fish Audio: Calidad premium, requiere API key."
+    )
+    
+    # Configuración específica según el proveedor
+    if tts_provider == "Edge TTS":
+        # --- CONFIGURACIÓN EDGE TTS ---
+        col_voz1, col_voz2, col_voz3, col_voz4 = st.columns(4)
+        
+        async def obtener_voces_es_tts():
+            voces = await edge_tts.list_voices()
+            return [(v['ShortName'], v['Name']) for v in voces if v['Locale'].startswith('es-')]
 
-    try:
-        voces_esp_tuplas = asyncio.run(obtener_voces_es_tts())
-        nombres_cortos = [v[0] for v in voces_esp_tuplas]
-        nombres_completos = [v[1] for v in voces_esp_tuplas]
-        default_voice_short = app_config.get("ai", {}).get("default_models", {}).get("voice", "es-ES-AlvaroNeural")
-        voice_index = nombres_cortos.index(default_voice_short) if default_voice_short in nombres_cortos else 0
-    except Exception as e:
-        st.warning(f"No se pudieron cargar las voces de EdgeTTS: {e}. Usando default.")
-        nombres_cortos = ["es-ES-AlvaroNeural"]
-        nombres_completos = ["Microsoft Server Speech Text to Speech Voice (es-ES, AlvaroNeural)"]
-        voice_index = 0
+        try:
+            voces_esp_tuplas = asyncio.run(obtener_voces_es_tts())
+            nombres_cortos = [v[0] for v in voces_esp_tuplas]
+            nombres_completos = [v[1] for v in voces_esp_tuplas]
+            default_voice_short = app_config.get("ai", {}).get("default_models", {}).get("voice", "es-ES-AlvaroNeural")
+            voice_index = nombres_cortos.index(default_voice_short) if default_voice_short in nombres_cortos else 0
+        except Exception as e:
+            st.warning(f"No se pudieron cargar las voces de EdgeTTS: {e}. Usando default.")
+            nombres_cortos = ["es-ES-AlvaroNeural"]
+            nombres_completos = ["Microsoft Server Speech Text to Speech Voice (es-ES, AlvaroNeural)"]
+            voice_index = 0
 
-    with col_voz1:
-        selected_voice_short = st.selectbox("Voz", nombres_cortos, index=voice_index, key="batch_tts_voice")
-        tts_voice = nombres_completos[nombres_cortos.index(selected_voice_short)]
+        with col_voz1:
+            selected_voice_short = st.selectbox("Voz", nombres_cortos, index=voice_index, key="batch_tts_voice")
+            tts_voice = nombres_completos[nombres_cortos.index(selected_voice_short)]
              
-    with col_voz2:
-        tts_speed_percent = st.slider("Velocidad (%)", -50, 50, -5, 1, key="batch_tts_speed")
-    with col_voz3:
-        tts_pitch_hz = st.slider("Tono (Hz)", -50, 50, -5, 1, key="batch_tts_pitch")
-    with col_voz4:
-        tts_volume = st.slider("Volumen Voz", 0.0, 2.0, 1.0, 0.1, key="batch_tts_volume")
+        with col_voz2:
+            tts_speed_percent = st.slider("Velocidad (%)", -50, 50, -5, 1, key="batch_tts_speed")
+        with col_voz3:
+            tts_pitch_hz = st.slider("Tono (Hz)", -50, 50, -5, 1, key="batch_tts_pitch")
+        with col_voz4:
+            tts_volume = st.slider("Volumen Voz", 0.0, 2.0, 1.0, 0.1, key="batch_tts_volume")
+        
+        # Configuración para Edge TTS
+        tts_config = {
+            'tts_provider': 'edge',
+            'tts_voice': tts_voice,
+            'tts_speed_percent': tts_speed_percent,
+            'tts_pitch_hz': tts_pitch_hz,
+            'tts_volume': tts_volume
+        }
+        
+    else:  # Fish Audio
+        # --- CONFIGURACIÓN FISH AUDIO ---
+        st.info("🐟 **Fish Audio**: Calidad premium de síntesis de voz. Requiere API key configurada.")
+        
+        # Verificar si Fish Audio está disponible
+        try:
+            from utils.audio_services import FISH_AUDIO_AVAILABLE
+            if not FISH_AUDIO_AVAILABLE:
+                st.error("❌ Fish Audio SDK no está disponible. Instala 'fish-audio-sdk' para usar Fish Audio TTS.")
+                st.stop()
+        except ImportError:
+            st.error("❌ No se pudo verificar la disponibilidad de Fish Audio.")
+            st.stop()
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Modelo de Fish Audio
+            fish_models = [
+                ("speech-1.5", "Fish Audio Speech 1.5"),
+                ("speech-1.6", "Fish Audio Speech 1.6 (Recomendado)"),
+                ("s1", "Fish Audio S1")
+            ]
+            selected_fish_model = st.selectbox(
+                "Modelo",
+                [m[0] for m in fish_models],
+                index=1,  # speech-1.6 por defecto
+                key="batch_fish_model",
+                format_func=lambda x: dict(fish_models)[x]
+            )
+            
+            # Formato de salida
+            fish_format = st.selectbox(
+                "Formato",
+                ["mp3", "wav", "pcm"],
+                index=0,
+                key="batch_fish_format"
+            )
+            
+            # Bitrate para MP3
+            fish_bitrate = st.selectbox(
+                "Bitrate MP3",
+                [64, 128, 192],
+                index=1,  # 128 por defecto
+                key="batch_fish_bitrate",
+                disabled=(fish_format != "mp3")
+            )
+        
+        with col2:
+            # Latencia
+            fish_latency = st.selectbox(
+                "Latencia",
+                ["normal", "balanced"],
+                index=0,
+                key="batch_fish_latency",
+                help="Normal: Mayor estabilidad. Balanced: Menor latencia (300ms)"
+            )
+            
+            # Normalizar texto
+            fish_normalize = st.checkbox(
+                "Normalizar texto",
+                True,
+                key="batch_fish_normalize",
+                help="Mejora la estabilidad para números y texto en inglés/chino"
+            )
+            
+            # Volumen
+            tts_volume = st.slider("Volumen Voz", 0.0, 2.0, 1.0, 0.1, key="batch_tts_volume")
+        
+        # Configuración para Fish Audio
+        tts_config = {
+            'tts_provider': 'fish',
+            'tts_fish_model': selected_fish_model,
+            'tts_fish_format': fish_format,
+            'tts_fish_bitrate': fish_bitrate,
+            'tts_fish_latency': fish_latency,
+            'tts_fish_normalize': fish_normalize,
+            'tts_volume': tts_volume
+        }
 
     # --- MÚSICA DE FONDO ---
     st.markdown("**🎵 Música de Fondo**")
@@ -1205,15 +1307,15 @@ def _render_batch_audio_config(app_config):
         music_volume = st.slider("Volumen Música", 0.0, 1.0, 0.06, 0.01, "%.2f", key="batch_music_vol", disabled=(not bg_music_selection))
         music_loop = st.checkbox("Loop Música", True, key="batch_music_loop", disabled=(not bg_music_selection))
 
-    return {
-        'tts_voice': tts_voice,
-        'tts_speed_percent': tts_speed_percent,
-        'tts_pitch_hz': tts_pitch_hz,
-        'tts_volume': tts_volume,
+    # Combinar configuración TTS con música
+    audio_config = {
+        **tts_config,
         'bg_music_selection': bg_music_selection,
         'music_volume': music_volume,
         'music_loop': music_loop
     }
+    
+    return audio_config
 
 def _render_batch_subtitles_config():
     """Configuración de subtítulos específica para batch (sin duplicaciones de UI)"""

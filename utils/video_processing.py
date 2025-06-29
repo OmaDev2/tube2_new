@@ -32,7 +32,7 @@ try:
     from utils.scene_generator import SceneGenerator
     from utils.video_services import VideoServices
     from utils.subtitle_utils import split_subtitle_segments
-    from utils.transcription_services import TranscriptionService
+    from utils.transcription_services import TranscriptionService, get_transcription_service
     from utils.content_optimizer import ContentOptimizer
 except ImportError as e:
     logging.critical(f"FALLO CRÍTICO AL IMPORTAR SERVICIOS: {e}. La aplicación no puede continuar.", exc_info=True)
@@ -44,15 +44,16 @@ logger = logging.getLogger(__name__)
 
 class VideoProcessor:
     def __init__(self, config: Optional[Dict] = None):
-        self.app_config = config 
-        self.void_config = self._load_void_config()
-        self.video_gen_config = self.void_config.get('video_generation', {})     
-        paths_config = self.video_gen_config.get('paths', {})
-        self.projects_path = Path(paths_config.get('projects_dir', 'projects')) 
-        self.assets_dir = Path(paths_config.get('assets', 'overlays/'))
-        self.output_dir = Path(paths_config.get('output_dir', 'output/'))
-        self.audio_source_path = Path(paths_config.get('audio_source', 'data/')) 
-        self.background_music_path = Path(paths_config.get('background_music_dir', 'background_music')) 
+        """Inicializa el procesador de video con configuración opcional."""
+        self.void_config = config or self._load_void_config()
+        self.tts_config = self._load_tts_config()
+        self.transcription_config = self._load_transcription_config()
+        self.video_gen_config = self.void_config.get('video_generation', {})
+        
+        # Configurar directorios
+        self.projects_path = Path(self.video_gen_config.get('paths', {}).get('projects_dir', 'projects'))
+        self.output_dir = Path(self.video_gen_config.get('paths', {}).get('output_dir', 'output'))
+        self.background_music_path = Path(self.video_gen_config.get('paths', {}).get('background_music_dir', 'background_music'))
         
         self._setup_directories()
         self._initialize_services()
@@ -79,6 +80,63 @@ class VideoProcessor:
             logger.error(f"Error cargando .voidrules: {e}", exc_info=True)
             return {}
     
+    def _load_tts_config(self) -> Dict:
+        """Carga la configuración de TTS desde config.yaml"""
+        try:
+            from utils.config import load_config
+            config = load_config()
+            tts_config = config.get('tts', {})
+            logger.info(f"Configuración TTS cargada: {tts_config.get('default_provider', 'edge')}")
+            return tts_config
+        except Exception as e:
+            logger.warning(f"Error cargando configuración TTS: {e}")
+            return {
+                'default_provider': 'edge',
+                'edge': {
+                    'default_voice': 'es-ES-AlvaroNeural',
+                    'default_rate': '+0%',
+                    'default_pitch': '+0Hz'
+                },
+                'fish_audio': {
+                    'api_key': None,
+                    'default_model': 'speech-1.6',
+                    'default_format': 'mp3',
+                    'default_mp3_bitrate': 128,
+                    'default_normalize': True,
+                    'default_latency': 'normal',
+                    'reference_id': None
+                }
+            }
+    
+    def _load_transcription_config(self) -> Dict:
+        """Carga la configuración de transcripción desde config.yaml"""
+        try:
+            from utils.config import load_config
+            config = load_config()
+            transcription_config = config.get('transcription', {})
+            logger.info(f"Configuración de transcripción cargada: {transcription_config.get('service_type', 'local')}")
+            return transcription_config
+        except Exception as e:
+            logger.warning(f"Error cargando configuración de transcripción: {e}")
+            return {
+                'service_type': 'local',
+                'local': {
+                    'model_size': 'medium',
+                    'device': 'cpu',
+                    'compute_type': 'int8',
+                    'default_language': 'es',
+                    'beam_size': 5
+                },
+                'replicate': {
+                    'default_language': 'es',
+                    'task': 'transcribe',
+                    'timestamp': 'chunk',
+                    'batch_size': 24,
+                    'diarise_audio': False,
+                    'hf_token': None
+                }
+            }
+    
     def _setup_directories(self):
         self.projects_path.mkdir(exist_ok=True)
         self.output_dir.mkdir(exist_ok=True)
@@ -92,7 +150,33 @@ class VideoProcessor:
         self.scene_generator = None 
         logger.info(f"SceneGenerator inicializado (placeholder): {type(self.scene_generator)}") 
         self.video_service = VideoServices() 
-        self.transcription_service = TranscriptionService()
+        
+        # Inicializar servicio de transcripción según configuración
+        transcription_type = self.transcription_config.get('service_type', 'local')
+        logger.info(f"Configurando servicio de transcripción: {transcription_type}")
+        
+        if transcription_type == 'replicate':
+            # Usar Replicate para transcripción
+            replicate_token = self.ai_service.replicate_token
+            if not replicate_token:
+                logger.warning("No se encontró token de Replicate, usando transcripción local")
+                self.transcription_service = get_transcription_service('local')
+            else:
+                # Obtener configuración específica de Replicate
+                replicate_config = self.transcription_config.get('replicate', {})
+                self.transcription_service = get_transcription_service('replicate', api_token=replicate_token)
+                logger.info(f"TranscriptionService inicializado con Replicate - Idioma: {replicate_config.get('default_language', 'es')}")
+        else:
+            # Usar transcripción local
+            local_config = self.transcription_config.get('local', {})
+            self.transcription_service = get_transcription_service(
+                'local',
+                model_size=local_config.get('model_size', 'medium'),
+                device=local_config.get('device', 'cpu'),
+                compute_type=local_config.get('compute_type', 'int8')
+            )
+            logger.info(f"TranscriptionService inicializado con Whisper local - Modelo: {local_config.get('model_size', 'medium')}")
+        
         # ContentOptimizer se inicializa con valores por defecto, se configurará dinámicamente
         self.content_optimizer = ContentOptimizer(self.ai_service)
         logger.info("Servicios inicializados.")
@@ -181,14 +265,39 @@ class VideoProcessor:
             logger.info(f"[{project_id}] Audio TTS...")
             audio_config_ui = full_config.get("audio", {}) # Necesario para _apply_audio después
             tts_settings = {k: v for k, v in audio_config_ui.items() if k.startswith('tts_')}
-            from utils.audio_services import generate_edge_tts_audio 
-            audio_path_generated = generate_edge_tts_audio(
-                 text=script_content, 
-                 voice=tts_settings.get('tts_voice', self.video_gen_config.get('audio',{}).get('default_voice','es-ES-AlvaroNeural')),
-                 rate=f"{tts_settings.get('tts_speed_percent', 0):+d}%", 
-                 pitch=f"{tts_settings.get('tts_pitch_hz', 0):+d}Hz",
-                 output_dir=str(base_path / "audio")
-            )
+            
+            # Obtener configuración de TTS
+            tts_provider = tts_settings.get('tts_provider', 'edge')
+            from utils.audio_services import generate_tts_audio
+            
+            if tts_provider == 'edge':
+                # Configuración para Edge TTS
+                audio_path_generated = generate_tts_audio(
+                    text=script_content,
+                    tts_provider='edge',
+                    voice=tts_settings.get('tts_voice', self.video_gen_config.get('audio',{}).get('default_voice','es-ES-AlvaroNeural')),
+                    rate=f"{tts_settings.get('tts_speed_percent', 0):+d}%",
+                    pitch=f"{tts_settings.get('tts_pitch_hz', 0):+d}Hz",
+                    output_dir=str(base_path / "audio")
+                )
+            elif tts_provider == 'fish':
+                # Configuración para Fish Audio
+                fish_config = self.tts_config.get('fish_audio', {})
+                audio_path_generated = generate_tts_audio(
+                    text=script_content,
+                    tts_provider='fish',
+                    output_dir=str(base_path / "audio"),
+                    fish_api_key=fish_config.get('api_key'),
+                    fish_reference_id=fish_config.get('reference_id'),
+                    fish_model=tts_settings.get('tts_fish_model', fish_config.get('default_model', 'speech-1.6')),
+                    fish_format=tts_settings.get('tts_fish_format', fish_config.get('default_format', 'mp3')),
+                    fish_mp3_bitrate=tts_settings.get('tts_fish_bitrate', fish_config.get('default_mp3_bitrate', 128)),
+                    fish_normalize=tts_settings.get('tts_fish_normalize', fish_config.get('default_normalize', True)),
+                    fish_latency=tts_settings.get('tts_fish_latency', fish_config.get('default_latency', 'normal'))
+                )
+            else:
+                raise ValueError(f"Proveedor TTS no soportado: {tts_provider}")
+                
             if not audio_path_generated or not Path(audio_path_generated).exists(): 
                 raise RuntimeError("Fallo audio TTS: No se generó el archivo o no se encontró.")
             project_info["audio_path"] = audio_path_generated

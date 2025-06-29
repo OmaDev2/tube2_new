@@ -3,6 +3,9 @@ import time
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 import logging
+import replicate
+import os
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -157,4 +160,310 @@ class TranscriptionService:
                     f.write(f"[{segment['start']:.2f} - {segment['end']:.2f}] {segment['text']}\n")
         
         logger.info(f"Transcripción guardada en {output_path}")
-        return str(output_path) 
+        return str(output_path)
+
+class ReplicateTranscriptionService:
+    """
+    Servicio de transcripción usando Replicate con el modelo "Incredibly Fast Whisper".
+    Mucho más rápido que el Whisper tradicional y con excelente soporte multiidioma.
+    """
+    
+    def __init__(self, api_token: Optional[str] = None):
+        """
+        Inicializa el servicio de transcripción de Replicate.
+        
+        Args:
+            api_token: Token de API de Replicate (opcional, se puede usar variable de entorno)
+        """
+        self.api_token = api_token or os.getenv("REPLICATE_API_TOKEN")
+        if not self.api_token:
+            raise ValueError("Se requiere REPLICATE_API_TOKEN para usar ReplicateTranscriptionService")
+        
+        # Configurar Replicate
+        os.environ["REPLICATE_API_TOKEN"] = self.api_token
+        
+        # Modelo específico de Incredibly Fast Whisper
+        self.model_id = "vaibhavs10/incredibly-fast-whisper:3ab86df6c8f54c11309d4d1f930ac292bad43ace52d10c80d87eb258b3c9f79c"
+        
+        # Idiomas soportados
+        self.supported_languages = {
+            "es": "spanish",
+            "en": "english", 
+            "fr": "french",
+            "pt": "portuguese",
+            "pt-BR": "portuguese",  # Portugués brasileño
+            "it": "italian"
+        }
+        
+        logger.info("ReplicateTranscriptionService inicializado")
+    
+    def transcribe_audio(
+        self,
+        audio_path: str,
+        language: str = "es",
+        task: str = "transcribe",
+        timestamp: str = "chunk",
+        batch_size: int = 24,
+        diarise_audio: bool = False,
+        hf_token: Optional[str] = None,
+        progress_callback: Optional[callable] = None
+    ) -> Tuple[List[Dict], Dict]:
+        """
+        Transcribe un archivo de audio usando Replicate Incredibly Fast Whisper.
+        
+        Args:
+            audio_path: Ruta al archivo de audio
+            language: Código de idioma (ej: 'es', 'en', 'fr')
+            task: Tarea ('transcribe' o 'translate')
+            timestamp: Tipo de timestamp ('chunk' o 'word')
+            batch_size: Tamaño del batch para procesamiento
+            diarise_audio: Si se debe hacer diarización
+            hf_token: Token de Hugging Face para diarización
+            progress_callback: Función de callback para progreso
+            
+        Returns:
+            Tuple[List[Dict], Dict]: Segmentos con timestamps y metadata
+        """
+        import time
+        from pathlib import Path
+        
+        start_time = time.time()
+        
+        try:
+            logger.info(f"🚀 Iniciando transcripción con Replicate Incredibly Fast Whisper: {audio_path}")
+            
+            if progress_callback:
+                progress_callback(0.1, "🚀 Iniciando transcripción con Replicate...")
+            
+            # Verificar que el archivo existe
+            audio_file = Path(audio_path)
+            if not audio_file.exists():
+                raise FileNotFoundError(f"Archivo de audio no encontrado: {audio_path}")
+            
+            # Obtener nombre de idioma
+            language_name = self.supported_languages.get(language, language)
+            
+            if progress_callback:
+                progress_callback(0.2, "📤 Preparando archivo de audio...")
+            
+            # Usar el método correcto de Replicate: abrir el archivo directamente
+            with open(audio_path, "rb") as audio_file:
+                # Preparar input para Replicate
+                input_params = {
+                    "audio": audio_file,
+                    "task": task,
+                    "language": language_name,
+                    "timestamp": timestamp,
+                    "batch_size": batch_size,
+                    "diarise_audio": diarise_audio
+                }
+                
+                # Añadir hf_token si se proporciona
+                if hf_token:
+                    input_params["hf_token"] = hf_token
+                
+                if progress_callback:
+                    progress_callback(0.3, "📡 Enviando audio a Replicate...")
+                
+                # Ejecutar transcripción usando el método correcto
+                output = replicate.run(self.model_id, input=input_params)
+                
+                if progress_callback:
+                    progress_callback(0.7, "📝 Procesando resultados...")
+                
+                # Procesar la salida
+                segments, metadata = self._process_replicate_output(output, audio_path)
+                
+                end_time = time.time()
+                duration = end_time - start_time
+                
+                # Añadir información de duración al metadata
+                metadata["processing_duration"] = duration
+                metadata["model"] = "incredibly-fast-whisper"
+                metadata["provider"] = "replicate"
+                
+                if progress_callback:
+                    progress_callback(1.0, "✅ Transcripción completada")
+                
+                logger.info(f"Transcripción Replicate completada en {duration:.2f} segundos")
+                return segments, metadata
+                
+        except Exception as e:
+            logger.error(f"Error durante la transcripción con Replicate: {str(e)}")
+            raise
+    
+    def _process_replicate_output(self, output: Dict, audio_path: str) -> Tuple[List[Dict], Dict]:
+        """
+        Procesa la salida de Replicate y la convierte al formato estándar.
+        
+        Args:
+            output: Salida de Replicate
+            audio_path: Ruta del archivo de audio original
+            
+        Returns:
+            Tuple[List[Dict], Dict]: Segmentos procesados y metadata
+        """
+        try:
+            # La salida de Replicate puede tener diferentes formatos
+            if isinstance(output, dict):
+                # Formato JSON completo
+                text = output.get("text", "")
+                chunks = output.get("chunks", [])
+                language = output.get("language", "unknown")
+                language_probability = output.get("language_probability", 0.0)
+            elif isinstance(output, str):
+                # Solo texto
+                text = output
+                chunks = []
+                language = "unknown"
+                language_probability = 0.0
+            else:
+                logger.warning(f"Formato de salida inesperado de Replicate: {type(output)}")
+                text = str(output)
+                chunks = []
+                language = "unknown"
+                language_probability = 0.0
+            
+            # Procesar chunks si están disponibles
+            segments = []
+            all_words = []
+            
+            if chunks:
+                # Usar chunks con timestamps
+                for chunk in chunks:
+                    if isinstance(chunk, dict):
+                        segment_info = {
+                            "text": chunk.get("text", ""),
+                            "start": round(chunk.get("start", 0), 2),
+                            "end": round(chunk.get("end", 0), 2),
+                            "words": []
+                        }
+                        
+                        # Procesar palabras si están disponibles
+                        words = chunk.get("words", [])
+                        for word in words:
+                            if isinstance(word, dict):
+                                word_info = {
+                                    "text": word.get("text", ""),
+                                    "start": round(word.get("start", 0), 2),
+                                    "end": round(word.get("end", 0), 2)
+                                }
+                                all_words.append(word_info)
+                                segment_info["words"].append(word_info)
+                        
+                        segments.append(segment_info)
+            else:
+                # Si no hay chunks, crear un segmento único
+                segment_info = {
+                    "text": text,
+                    "start": 0.0,
+                    "end": 0.0,  # Se puede estimar basado en la duración del audio
+                    "words": []
+                }
+                segments.append(segment_info)
+            
+            metadata = {
+                "language": language,
+                "language_probability": language_probability,
+                "num_words": len(all_words),
+                "num_segments": len(segments),
+                "audio_path": audio_path,
+                "model_id": self.model_id
+            }
+            
+            return segments, metadata
+            
+        except Exception as e:
+            logger.error(f"Error procesando salida de Replicate: {e}")
+            # Devolver formato básico en caso de error
+            return [{"text": str(output), "start": 0.0, "end": 0.0, "words": []}], {
+                "language": "unknown",
+                "language_probability": 0.0,
+                "num_words": 0,
+                "num_segments": 1,
+                "audio_path": audio_path,
+                "model_id": self.model_id,
+                "error": str(e)
+            }
+    
+    def save_transcription(
+        self,
+        segments: List[Dict],
+        metadata: Dict,
+        output_path: str,
+        format: str = "json"
+    ) -> str:
+        """
+        Guarda la transcripción en un archivo.
+        
+        Args:
+            segments: Lista de segmentos con timestamps
+            metadata: Metadata de la transcripción
+            output_path: Ruta donde guardar el archivo
+            format: Formato de salida ('json' o 'txt')
+            
+        Returns:
+            str: Ruta al archivo guardado
+        """
+        import json
+        
+        output_path = Path(output_path)
+        if format == "json":
+            data = {
+                "metadata": metadata,
+                "segments": segments
+            }
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        else:
+            # Formato de texto simple con timestamps
+            with open(output_path, "w", encoding="utf-8") as f:
+                for segment in segments:
+                    f.write(f"[{segment['start']:.2f} - {segment['end']:.2f}] {segment['text']}\n")
+        
+        logger.info(f"Transcripción Replicate guardada en {output_path}")
+        return str(output_path)
+    
+    def get_supported_languages(self) -> Dict[str, str]:
+        """Devuelve los idiomas soportados."""
+        return self.supported_languages.copy()
+    
+    def estimate_cost(self, audio_duration_seconds: float) -> Dict[str, float]:
+        """
+        Estima el costo de transcripción basado en la duración del audio.
+        
+        Args:
+            audio_duration_seconds: Duración del audio en segundos
+            
+        Returns:
+            Dict con estimación de costo
+        """
+        # Replicate cobra por tiempo de cómputo, no por duración de audio
+        # Estimación aproximada: $0.01-0.05 por minuto de audio
+        cost_per_minute = 0.03  # Estimación conservadora
+        duration_minutes = audio_duration_seconds / 60
+        
+        estimated_cost = duration_minutes * cost_per_minute
+        
+        return {
+            "estimated_cost_usd": estimated_cost,
+            "duration_minutes": duration_minutes,
+            "cost_per_minute": cost_per_minute
+        }
+
+# Función unificada para elegir el servicio de transcripción
+def get_transcription_service(service_type: str = "local", **kwargs) -> TranscriptionService:
+    """
+    Obtiene el servicio de transcripción apropiado.
+    
+    Args:
+        service_type: Tipo de servicio ('local' para Whisper local, 'replicate' para Replicate)
+        **kwargs: Argumentos adicionales para el servicio
+        
+    Returns:
+        TranscriptionService o ReplicateTranscriptionService
+    """
+    if service_type.lower() == "replicate":
+        return ReplicateTranscriptionService(**kwargs)
+    else:
+        return TranscriptionService(**kwargs) 

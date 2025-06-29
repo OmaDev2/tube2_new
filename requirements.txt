@@ -15,3 +15,7 @@ replicate==0.22.0
 firebase-admin==6.4.0
 python-dotenv==1.0.1
 fuzzywuzzy
+# Fish Audio TTS dependencies
+fish-audio-sdk
+httpx
+ormsgpack

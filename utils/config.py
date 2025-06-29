@@ -25,6 +25,23 @@ DEFAULT_CONFIG = {
             "default_voice": "es-ES-AlvaroNeural"
         }
     },
+    "tts": {
+        "default_provider": "edge",
+        "edge": {
+            "default_voice": "es-ES-AlvaroNeural",
+            "default_rate": "+0%",
+            "default_pitch": "+0Hz"
+        },
+        "fish_audio": {
+            "api_key": "TU_CLAVE_FISH_AUDIO_AQUI",
+            "default_model": "speech-1.6",
+            "default_format": "mp3",
+            "default_mp3_bitrate": 128,
+            "default_normalize": True,
+            "default_latency": "normal",
+            "reference_id": None
+        }
+    },
     "video_generation": {
         "quality": {
             "resolution": "1920x1080",
@@ -56,7 +73,29 @@ DEFAULT_CONFIG = {
             "default_music_volume": 0.08,
             "normalize_audio": True
         }
-    }
+    },
+    "transcription": {
+        "service_type": "local",  # "local" o "replicate"
+        "local": {
+            "model_size": "medium",
+            "device": "cpu",
+            "compute_type": "int8",
+            "default_language": "es",
+            "beam_size": 5
+        },
+        "replicate": {
+            "default_language": "es",
+            "task": "transcribe",
+            "timestamp": "chunk",
+            "batch_size": 24,
+            "diarise_audio": False,
+            "hf_token": None
+        }
+    },
+    "output_dir": "output",
+    "projects_dir": "projects",
+    "temp_dir": "temp",
+    "background_music_dir": "background_music"
 }
 
 # --- Funciones ---
