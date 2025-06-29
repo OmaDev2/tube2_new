@@ -332,10 +332,15 @@ class ReplicateTranscriptionService:
                 # Usar chunks con timestamps
                 for chunk in chunks:
                     if isinstance(chunk, dict):
+                        # Replicate devuelve timestamps en formato [start, end]
+                        timestamp = chunk.get("timestamp", [0, 0])
+                        start_time = timestamp[0] if len(timestamp) > 0 else 0
+                        end_time = timestamp[1] if len(timestamp) > 1 else 0
+                        
                         segment_info = {
                             "text": chunk.get("text", ""),
-                            "start": round(chunk.get("start", 0), 2),
-                            "end": round(chunk.get("end", 0), 2),
+                            "start": round(start_time, 2),
+                            "end": round(end_time, 2),
                             "words": []
                         }
                         

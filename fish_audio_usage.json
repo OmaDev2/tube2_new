@@ -1,0 +1,52 @@
+{
+  "total_bytes_processed": 1812,
+  "total_cost_usd": 0.027180000000000003,
+  "daily_usage": {
+    "2025-06-29": {
+      "bytes_processed": 1812,
+      "cost_usd": 0.027180000000000003,
+      "requests": 3,
+      "models_used": {
+        "speech-1.6": 3
+      }
+    }
+  },
+  "monthly_usage": {
+    "2025-06": {
+      "bytes_processed": 1812,
+      "cost_usd": 0.027180000000000003,
+      "requests": 3
+    }
+  },
+  "usage_history": [
+    {
+      "timestamp": "2025-06-29T19:41:26.076365",
+      "text_length": 595,
+      "bytes_processed": 604,
+      "cost_usd": 0.00906,
+      "model": "speech-1.6",
+      "date": "2025-06-29"
+    },
+    {
+      "timestamp": "2025-06-29T19:55:58.305957",
+      "text_length": 595,
+      "bytes_processed": 604,
+      "cost_usd": 0.00906,
+      "model": "speech-1.6",
+      "date": "2025-06-29"
+    },
+    {
+      "timestamp": "2025-06-29T20:21:27.524315",
+      "text_length": 595,
+      "bytes_processed": 604,
+      "cost_usd": 0.00906,
+      "model": "speech-1.6",
+      "date": "2025-06-29"
+    }
+  ],
+  "budget_limit": 50.0,
+  "alerts": {
+    "budget_warning_threshold": 0.8,
+    "daily_limit_warning": 10.0
+  }
+}

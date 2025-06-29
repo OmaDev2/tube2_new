@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # --- NUEVA CONSTANTE ---
 # Si una escena dura más que esto (en segundos), se subdividirá para mantener el dinamismo.
-MAX_SCENE_DURATION = 15.0
+MAX_SCENE_DURATION = 12.0
 
 class SceneGenerator:
     def __init__(self, config: Optional[Dict] = None):

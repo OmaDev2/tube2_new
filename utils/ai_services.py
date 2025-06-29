@@ -121,8 +121,8 @@ class AIServices:
         self.gemini_key = os.getenv("GEMINI_API_KEY") or ai_config.get("gemini_api_key")
         self.openai_key = os.getenv("OPENAI_API_KEY") or ai_config.get("openai_api_key")
         self.ollama_host = os.getenv("OLLAMA_BASE_URL") or ai_config.get("ollama_base_url")
-        # Forzar el token correcto
-        self.replicate_token = "r8_G1uMx5pxBkF3jmkTxewqHCtuW70dmyc2pA9cg"
+        # Usar la configuración correcta para Replicate
+        self.replicate_token = os.getenv("REPLICATE_API_KEY") or ai_config.get("replicate_api_key")
         
         self.openai_client = None
         self.ollama_client = None
