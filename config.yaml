@@ -1,7 +1,7 @@
 ai:
   openai_api_key: TU_CLAVE_OPENAI_AQUI
-  gemini_api_key: AIzaSyBcyHACiwsBmLn6slb6Zr8VuUE7KTEWNYA
-  replicate_api_key: ***REMOVED***
+  gemini_api_key: TU_CLAVE_GEMINI_AQUI
+  replicate_api_key: TU_CLAVE_REPLICATE_AQUI
   ollama_base_url: http://localhost:11434
   default_models:
     openai: gpt-4o-mini
@@ -17,13 +17,13 @@ tts:
     default_rate: +0%
     default_pitch: +0Hz
   fish_audio:
-    api_key: 5b076c49251f4874bdb6171f80fc47f2
+    api_key: TU_CLAVE_FISH_AUDIO_AQUI
     default_model: speech-1.6
     default_format: mp3
     default_mp3_bitrate: 128
     default_normalize: true
     default_latency: normal
-    reference_id: 8d2c17a9b26d4d83888ea67a1ee565b2
+    reference_id: TU_REFERENCE_ID_AQUI
 video_generation:
   quality:
     resolution: 1920x1080
