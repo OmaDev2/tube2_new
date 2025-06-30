@@ -1,21 +1,21 @@
 {
-  "total_bytes_processed": 1812,
-  "total_cost_usd": 0.027180000000000003,
+  "total_bytes_processed": 35527,
+  "total_cost_usd": 0.5329050000000001,
   "daily_usage": {
     "2025-06-29": {
-      "bytes_processed": 1812,
-      "cost_usd": 0.027180000000000003,
-      "requests": 3,
+      "bytes_processed": 35527,
+      "cost_usd": 0.5329050000000001,
+      "requests": 5,
       "models_used": {
-        "speech-1.6": 3
+        "speech-1.6": 5
       }
     }
   },
   "monthly_usage": {
     "2025-06": {
-      "bytes_processed": 1812,
-      "cost_usd": 0.027180000000000003,
-      "requests": 3
+      "bytes_processed": 35527,
+      "cost_usd": 0.5329050000000001,
+      "requests": 5
     }
   },
   "usage_history": [
@@ -40,6 +40,22 @@
       "text_length": 595,
       "bytes_processed": 604,
       "cost_usd": 0.00906,
+      "model": "speech-1.6",
+      "date": "2025-06-29"
+    },
+    {
+      "timestamp": "2025-06-29T20:28:07.125240",
+      "text_length": 595,
+      "bytes_processed": 604,
+      "cost_usd": 0.00906,
+      "model": "speech-1.6",
+      "date": "2025-06-29"
+    },
+    {
+      "timestamp": "2025-06-29T20:55:41.484157",
+      "text_length": 32478,
+      "bytes_processed": 33111,
+      "cost_usd": 0.496665,
       "model": "speech-1.6",
       "date": "2025-06-29"
     }
