@@ -12,6 +12,13 @@ import logging
 import json
 from typing import Union, Optional, Dict, List # Mover imports de typing al principio
 
+# Cargar variables de entorno desde .env
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv no está instalado, continuar sin él
+
 # Configuración logging
 logger = logging.getLogger(__name__)
 
