@@ -10,6 +10,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from pages.batch_page import render_batch
 from pages.video_generator import show_video_generator
+from pages.video_generator_v2 import render_video_generator_v2
 from pages.prompts_manager_page import render_prompts_manager
 from pages.settings_page import show_settings_page
 from pages.gestion_canales_page import render_gestion_canales
@@ -52,6 +53,7 @@ def main():
     page = st.sidebar.radio("Selecciona una página", [
         "🚀 Procesador por Lotes", 
         "🎥 Generador Manual", 
+        "🎬 Generador V2 (Experimental)",
         "📋 Gestor de Prompts", 
         "⚙️ Configuración Central", 
         "📺 Gestión de Canales",
@@ -65,6 +67,8 @@ def main():
             render_batch(app_config)
         elif page == "🎥 Generador Manual":
             show_video_generator()
+        elif page == "🎬 Generador V2 (Experimental)":
+            render_video_generator_v2()
         elif page == "📋 Gestor de Prompts":
             render_prompts_manager(app_config)
         elif page == "⚙️ Configuración Central":

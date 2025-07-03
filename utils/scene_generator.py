@@ -178,24 +178,33 @@ class SceneGenerator:
         """
         Crea escenas semánticamente coherentes con subdivisión inteligente.
         
-        LÓGICA:
+        LÓGICA MEJORADA V2.1 - CORRECCIONES APLICADAS:
         1. Detecta unidades narrativas completas
-        2. Si unidad > 20-25s → subdividir en momentos visuales de 10-12s
-        3. Mantiene sincronización exacta con audio
+        2. Si unidad > 12s → subdividir en momentos visuales dinámicos
+        3. Mantiene sincronización exacta con audio REAL
+        4. Considera transiciones y fades
+        5. NUEVO: Corrige codificación de caracteres
+        6. NUEVO: Evita cortes en medio de frases importantes
         """
         if not transcription_segments:
             return []
         
-        # PARÁMETROS AJUSTADOS
-        MAX_NARRATIVE_UNIT = 20.0  # Máximo para unidad narrativa (20-25s límite)
-        TARGET_IMAGE_DURATION = 11.0  # Duración ideal por imagen (10-12s)
-        MAX_IMAGE_DURATION = 15.0   # Máximo absoluto por imagen
-        MIN_NARRATIVE_DURATION = 8.0  # Mínimo para considerar subdivisión
+        # PASO 0: Corregir codificación de caracteres en todos los segmentos
+        transcription_segments = self._fix_encoding_in_segments(transcription_segments)
         
-        logger.info(f"Creando escenas con subdivisión inteligente:")
+        # PARÁMETROS OPTIMIZADOS PARA DINAMISMO
+        MAX_NARRATIVE_UNIT = 15.0   # Máximo para unidad narrativa (reducido)
+        TARGET_IMAGE_DURATION = 8.0  # Duración ideal por imagen (más dinámico)
+        MAX_IMAGE_DURATION = 12.0    # Máximo absoluto por imagen (límite estricto)
+        MIN_NARRATIVE_DURATION = 4.0  # Mínimo para evitar cortes muy rápidos
+        TRANSITION_DURATION = 1.0     # Duración de transiciones
+        
+        logger.info(f"🎬 Creando escenas dinámicas V2:")
         logger.info(f"  • Unidad narrativa máxima: {MAX_NARRATIVE_UNIT}s")
         logger.info(f"  • Duración objetivo por imagen: {TARGET_IMAGE_DURATION}s")
         logger.info(f"  • Duración máxima por imagen: {MAX_IMAGE_DURATION}s")
+        logger.info(f"  • Duración mínima por imagen: {MIN_NARRATIVE_DURATION}s")
+        logger.info(f"  • Duración de transiciones: {TRANSITION_DURATION}s")
         
         # PASO 1: Detectar unidades narrativas completas
         narrative_units = self._detect_narrative_units(transcription_segments, MAX_NARRATIVE_UNIT)
@@ -209,8 +218,9 @@ class SceneGenerator:
             
             logger.info(f"Unidad {unit_idx+1}: {unit_duration:.1f}s - {unit_text[:60]}...")
             
-            # Si la unidad es corta, usar como una sola escena
-            if unit_duration <= MAX_NARRATIVE_UNIT:
+            # Verificar si la unidad necesita subdivisión
+            if unit_duration <= MAX_IMAGE_DURATION:
+                # Unidad corta: usar como una sola escena
                 final_scenes.append({
                     "index": len(final_scenes),
                     "text": unit_text,
@@ -218,14 +228,15 @@ class SceneGenerator:
                     "end": unit['end'],
                     "duration": unit_duration,
                     "narrative_unit": unit_idx + 1,
-                    "visual_moment": 1
+                    "visual_moment": 1,
+                    "scene_type": "single_unit"
                 })
                 logger.info(f"  → Escena única ({unit_duration:.1f}s)")
             
             else:
-                # Unidad larga: subdividir en momentos visuales
+                # Unidad larga: subdividir en momentos visuales dinámicos
                 logger.info(f"  → Subdividiendo unidad larga ({unit_duration:.1f}s)")
-                visual_moments = self._create_visual_moments(unit, TARGET_IMAGE_DURATION, MAX_IMAGE_DURATION)
+                visual_moments = self._create_dynamic_visual_moments(unit, TARGET_IMAGE_DURATION, MAX_IMAGE_DURATION, MIN_NARRATIVE_DURATION)
                 
                 for moment_idx, moment in enumerate(visual_moments):
                     final_scenes.append({
@@ -235,7 +246,8 @@ class SceneGenerator:
                         "end": moment['end'],
                         "duration": moment['duration'],
                         "narrative_unit": unit_idx + 1,
-                        "visual_moment": moment_idx + 1
+                        "visual_moment": moment_idx + 1,
+                        "scene_type": "subdivided_moment"
                     })
                     logger.info(f"    • Momento {moment_idx+1}: {moment['duration']:.1f}s - {moment['text'][:50]}...")
         
@@ -369,23 +381,30 @@ class SceneGenerator:
             logger.debug(f"    ➡️ Sin indicadores fuertes - Continuar unidad")
             return False
 
-    def _create_visual_moments(self, narrative_unit: Dict, target_duration: float, max_duration: float) -> List[Dict]:
+    def _create_dynamic_visual_moments(self, narrative_unit: Dict, target_duration: float, max_duration: float, min_duration: float) -> List[Dict]:
         """
-        Subdivide una unidad narrativa larga en momentos visuales de duración apropiada.
-        Mantiene coherencia semántica mientras respeta límites de duración.
+        Subdivide una unidad narrativa larga en momentos visuales dinámicos.
+        MEJORADO: Usa timestamps reales del audio y respeta límites estrictos.
         """
+        unit_segments = narrative_unit.get('segments', [])
         unit_text = narrative_unit['text']
         unit_start = narrative_unit['start']
         unit_end = narrative_unit['end']
         unit_duration = narrative_unit['duration']
         
-        # Calcular número óptimo de momentos visuales
-        num_moments = max(2, round(unit_duration / target_duration))
+        # Calcular número óptimo de momentos basado en límites estrictos
+        num_moments = max(2, math.ceil(unit_duration / max_duration))
+        
+        # Si tenemos segmentos de audio, usar distribución inteligente
+        if unit_segments:
+            return self._subdivide_using_audio_segments(unit_segments, target_duration, max_duration, min_duration)
+        
+        # Fallback: distribución uniforme
         moment_duration = unit_duration / num_moments
         
-        # Ajustar si los momentos quedan demasiado largos
+        # Asegurar que no exceda el máximo
         if moment_duration > max_duration:
-            num_moments = int(unit_duration / max_duration) + 1
+            num_moments = math.ceil(unit_duration / max_duration)
             moment_duration = unit_duration / num_moments
         
         logger.info(f"    Subdividiendo en {num_moments} momentos de ~{moment_duration:.1f}s cada uno")
@@ -428,6 +447,238 @@ class SceneGenerator:
                 })
         
         return moments
+    
+    def _subdivide_using_audio_segments(self, unit_segments: List[Dict], target_duration: float, max_duration: float, min_duration: float) -> List[Dict]:
+        """
+        Subdivide usando los segmentos reales del audio para máxima precisión.
+        MEJORADA V2.1: Usa timestamps exactos + evita cortes problemáticos.
+        """
+        
+        if not unit_segments:
+            return []
+        
+        moments = []
+        current_moment_segments = []
+        current_moment_start = unit_segments[0]['start']
+        current_moment_duration = 0.0
+        
+        logger.info(f"    📡 Usando {len(unit_segments)} segmentos de audio para subdivisión precisa (V2.1)")
+        
+        for i, segment in enumerate(unit_segments):
+            current_moment_segments.append(segment)
+            current_moment_duration = segment['end'] - current_moment_start
+            
+            # Determinar si cerrar el momento actual
+            should_close_moment = False
+            close_reason = ""
+            
+            # Es el último segmento
+            if i == len(unit_segments) - 1:
+                should_close_moment = True
+                close_reason = "último segmento"
+            
+            # Ha alcanzado duración máxima (límite estricto)
+            elif current_moment_duration >= max_duration:
+                should_close_moment = True
+                close_reason = f"límite máximo ({current_moment_duration:.1f}s >= {max_duration}s)"
+            
+            # Ha alcanzado duración objetivo Y hay un buen punto de corte (MEJORADO)
+            elif (current_moment_duration >= target_duration and 
+                  self._is_good_audio_cut_point(segment['text']) and
+                  not self._is_problematic_cut(segment['text'])):
+                should_close_moment = True
+                close_reason = f"duración objetivo + punto de corte natural (sin problemas)"
+            
+            # Hay una pausa larga después de este segmento
+            elif i < len(unit_segments) - 1:
+                next_segment = unit_segments[i + 1]
+                pause_duration = next_segment['start'] - segment['end']
+                
+                if (pause_duration > 0.8 and current_moment_duration >= min_duration):
+                    should_close_moment = True
+                    close_reason = f"pausa natural ({pause_duration:.1f}s)"
+            
+            if should_close_moment:
+                # Crear momento visual con timestamps EXACTOS (sin extensiones)
+                moment_text = " ".join(seg['text'].strip() for seg in current_moment_segments)
+                moment_end = segment['end']  # Usar timestamp exacto del audio
+                actual_duration = moment_end - current_moment_start
+                
+                # CORRECCIÓN: Asegurar que no hay extensiones artificiales
+                # El momento debe terminar exactamente donde termina el audio real
+                
+                # Validar duración mínima
+                if actual_duration >= min_duration:
+                    moments.append({
+                        'text': moment_text,
+                        'start': current_moment_start,
+                        'end': moment_end,
+                        'duration': actual_duration,
+                        'segments_count': len(current_moment_segments),
+                        'close_reason': close_reason
+                    })
+                    
+                    logger.info(f"      ✓ Momento: {actual_duration:.1f}s ({close_reason})")
+                else:
+                    # Si es muy corto, combinar con el momento anterior
+                    if moments:
+                        last_moment = moments[-1]
+                        last_moment['text'] += " " + moment_text
+                        last_moment['end'] = moment_end
+                        last_moment['duration'] = moment_end - last_moment['start']
+                        last_moment['segments_count'] += len(current_moment_segments)
+                        
+                        logger.info(f"      🔗 Combinado con momento anterior: {last_moment['duration']:.1f}s")
+                    else:
+                        # Es el primer momento y es muy corto, mantenerlo
+                        moments.append({
+                            'text': moment_text,
+                            'start': current_moment_start,
+                            'end': moment_end,
+                            'duration': actual_duration,
+                            'segments_count': len(current_moment_segments),
+                            'close_reason': f"{close_reason} (forzado por ser primero)"
+                        })
+                        
+                        logger.warning(f"      ⚠️ Momento corto mantenido: {actual_duration:.1f}s")
+                
+                # Iniciar nuevo momento
+                current_moment_segments = []
+                if i < len(unit_segments) - 1:
+                    current_moment_start = unit_segments[i + 1]['start']
+                    current_moment_duration = 0.0
+        
+        # Validación final: asegurar que no hay momentos demasiado largos
+        validated_moments = []
+        for moment in moments:
+            if moment['duration'] <= max_duration:
+                validated_moments.append(moment)
+            else:
+                # Momento aún muy largo: forzar subdivisión
+                logger.warning(f"      🔧 Forzando subdivisión de momento largo: {moment['duration']:.1f}s")
+                forced_sub_moments = self._force_subdivide_moment(moment, max_duration, min_duration)
+                validated_moments.extend(forced_sub_moments)
+        
+        return validated_moments
+    
+    def _is_good_audio_cut_point(self, text: str) -> bool:
+        """
+        Determina si un segmento de audio es un buen punto para cortar.
+        MEJORADO: Más criterios para puntos de corte naturales.
+        """
+        
+        text_lower = text.lower().strip()
+        
+        # Excelentes puntos de corte (finales de oración)
+        excellent_cuts = [".", "!", "?"]
+        for cut in excellent_cuts:
+            if text_lower.endswith(cut):
+                return True
+        
+        # Buenos puntos de corte (pausas naturales)
+        good_cuts = [",", ";", ":", " y ", " pero ", " sin embargo ", " además "]
+        for cut in good_cuts:
+            if cut in text_lower[-20:]:  # En los últimos 20 caracteres
+                return True
+        
+        # Conectores que permiten corte suave
+        connectors = [
+            "entonces", "después", "luego", "mientras", "cuando", "donde", 
+            "como", "así", "también", "además", "por tanto"
+        ]
+        
+        words = text_lower.split()
+        if words and words[-1] in connectors:
+            return True
+        
+        return False
+    
+    def _force_subdivide_moment(self, moment: Dict, max_duration: float, min_duration: float) -> List[Dict]:
+        """
+        Fuerza la subdivisión de un momento que sigue siendo demasiado largo.
+        Último recurso para garantizar límites estrictos.
+        """
+        
+        moment_duration = moment['duration']
+        moment_text = moment['text']
+        moment_start = moment['start']
+        moment_end = moment['end']
+        
+        # Calcular número de sub-momentos necesarios
+        num_sub_moments = math.ceil(moment_duration / max_duration)
+        sub_duration = moment_duration / num_sub_moments
+        
+        logger.info(f"        🔧 Forzando {num_sub_moments} sub-momentos de ~{sub_duration:.1f}s")
+        
+        # Dividir texto en partes aproximadamente iguales
+        sentences = self._split_text_into_sentences(moment_text)
+        sentences_per_sub = max(1, len(sentences) // num_sub_moments)
+        
+        sub_moments = []
+        
+        for sub_idx in range(num_sub_moments):
+            start_sentence = sub_idx * sentences_per_sub
+            
+            if sub_idx == num_sub_moments - 1:
+                # Último sub-momento: incluir oraciones restantes
+                end_sentence = len(sentences)
+            else:
+                end_sentence = (sub_idx + 1) * sentences_per_sub
+            
+            sub_sentences = sentences[start_sentence:end_sentence]
+            sub_text = " ".join(sub_sentences).strip()
+            
+            # Calcular tiempos proporcionales
+            sub_start = moment_start + (sub_idx * sub_duration)
+            sub_end = moment_start + ((sub_idx + 1) * sub_duration)
+            
+            # Ajustar último sub-momento para que termine exactamente
+            if sub_idx == num_sub_moments - 1:
+                sub_end = moment_end
+            
+            actual_sub_duration = sub_end - sub_start
+            
+            if sub_text and actual_sub_duration >= min_duration:
+                sub_moments.append({
+                    'text': sub_text,
+                    'start': sub_start,
+                    'end': sub_end,
+                    'duration': actual_sub_duration,
+                    'segments_count': 1,  # Estimado
+                    'close_reason': 'forced_subdivision'
+                })
+                
+                logger.info(f"          • Sub-momento {sub_idx+1}: {actual_sub_duration:.1f}s")
+        
+        return sub_moments
+    
+    def _split_text_into_sentences(self, text: str) -> List[str]:
+        """
+        Divide texto en oraciones para subdivisión forzada.
+        """
+        import re
+        
+        # Dividir por puntos, pero mantener oraciones completas
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        # Limpiar y filtrar
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        # Si hay muy pocas oraciones, dividir por comas
+        if len(sentences) < 3:
+            segments = re.split(r',\s+', text)
+            sentences = [s.strip() for s in segments if s.strip()]
+        
+        # Si aún hay muy pocos segmentos, dividir por palabras
+        if len(sentences) < 2:
+            words = text.split()
+            # Agrupar palabras en segmentos de ~10 palabras
+            sentences = []
+            for i in range(0, len(words), 10):
+                segment = " ".join(words[i:i+10])
+                sentences.append(segment)
+        
+        return sentences
 
     def _split_into_logical_segments(self, text: str) -> List[str]:
         """
@@ -1539,3 +1790,77 @@ class SceneGenerator:
         
         logger.info("🎭 Dossier NO requerido - Proyecto no parece biográfico/histórico")
         return False
+
+    def _fix_encoding_in_segments(self, transcription_segments):
+        """
+        Corrige problemas de codificación de caracteres en todos los segmentos.
+        """
+        
+        logger.info("🔤 Corrigiendo codificación de caracteres...")
+        
+        # Mapa de correcciones de codificación
+        encoding_fixes = {
+            '√°': 'á', '√©': 'é', '√≠': 'í', '√≥': 'ó', '√∫': 'ú', '√±': 'ñ',
+            '√Å': 'Á', '√É': 'É', '√Í': 'Í', '√ì': 'Ó', '√ö': 'Ú', '√Ñ': 'Ñ'
+        }
+        
+        fixed_segments = []
+        fixes_applied = 0
+        
+        for segment in transcription_segments:
+            fixed_segment = segment.copy()
+            original_text = segment.get('text', '')
+            fixed_text = original_text
+            
+            # Aplicar correcciones
+            for wrong_char, correct_char in encoding_fixes.items():
+                if wrong_char in fixed_text:
+                    fixed_text = fixed_text.replace(wrong_char, correct_char)
+                    fixes_applied += 1
+            
+            if fixed_text != original_text:
+                fixed_segment['text'] = fixed_text
+            
+            fixed_segments.append(fixed_segment)
+        
+        if fixes_applied > 0:
+            logger.info(f"✅ {fixes_applied} correcciones de codificación aplicadas")
+        
+        return fixed_segments
+
+    def _fix_encoding_in_segments(self, transcription_segments):
+        """
+        Corrige problemas de codificación de caracteres en todos los segmentos.
+        """
+        
+        logger.info("🔤 Corrigiendo codificación de caracteres...")
+        
+        # Mapa de correcciones de codificación
+        encoding_fixes = {
+            "√°": "á", "√©": "é", "√≠": "í", "√≥": "ó", "√∫": "ú", "√±": "ñ",
+            "√Å": "Á", "√É": "É", "√Í": "Í", "√ì": "Ó", "√ö": "Ú", "√Ñ": "Ñ"
+        }
+        
+        fixed_segments = []
+        fixes_applied = 0
+        
+        for segment in transcription_segments:
+            fixed_segment = segment.copy()
+            original_text = segment.get("text", "")
+            fixed_text = original_text
+            
+            # Aplicar correcciones
+            for wrong_char, correct_char in encoding_fixes.items():
+                if wrong_char in fixed_text:
+                    fixed_text = fixed_text.replace(wrong_char, correct_char)
+                    fixes_applied += 1
+            
+            if fixed_text != original_text:
+                fixed_segment["text"] = fixed_text
+            
+            fixed_segments.append(fixed_segment)
+        
+        if fixes_applied > 0:
+            logger.info(f"✅ {fixes_applied} correcciones de codificación aplicadas")
+        
+        return fixed_segments
