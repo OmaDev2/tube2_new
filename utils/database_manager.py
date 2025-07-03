@@ -58,7 +58,7 @@ class DatabaseManager:
                     guion TEXT,
                     contexto TEXT,
                     id_canal INTEGER NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('Pendiente', 'En Batch', 'Generando', 'Generado', 'Subido', 'Error')),
+                    status TEXT NOT NULL CHECK(status IN ('Pendiente', 'En Batch', 'Generando', 'Generado', 'Programado', 'Publicado', 'Error')),
                     script_type TEXT DEFAULT 'manual',
                     ruta_proyecto TEXT,
                     fecha_planificacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -48,6 +48,7 @@ class VideoProcessor:
         self.void_config = config or self._load_void_config()
         self.tts_config = self._load_tts_config()
         self.transcription_config = self._load_transcription_config()
+        self.overlay_config = self._load_overlay_config()
         self.video_gen_config = self.void_config.get('video_generation', {})
         
         # Configurar directorios
@@ -118,24 +119,19 @@ class VideoProcessor:
             return transcription_config
         except Exception as e:
             logger.warning(f"Error cargando configuración de transcripción: {e}")
-            return {
-                'service_type': 'local',
-                'local': {
-                    'model_size': 'medium',
-                    'device': 'cpu',
-                    'compute_type': 'int8',
-                    'default_language': 'es',
-                    'beam_size': 5
-                },
-                'replicate': {
-                    'default_language': 'es',
-                    'task': 'transcribe',
-                    'timestamp': 'chunk',
-                    'batch_size': 24,
-                    'diarise_audio': False,
-                    'hf_token': None
-                }
-            }
+    
+    def _load_overlay_config(self) -> Dict:
+        """Carga la configuración de overlays desde config.yaml"""
+        try:
+            from utils.config import load_config
+            config = load_config()
+            overlays_config = config.get('video_generation', {}).get('effects', {}).get('overlays', [{}])
+            default_opacity = overlays_config[0].get('opacity', 0.3) if overlays_config else 0.3
+            logger.info(f"Configuración de overlays cargada: opacidad por defecto {default_opacity}")
+            return {'default_opacity': default_opacity}
+        except Exception as e:
+            logger.warning(f"Error cargando configuración de overlays: {e}")
+            return {'default_opacity': 0.3}
     
     def _setup_directories(self):
         self.projects_path.mkdir(exist_ok=True)
@@ -552,6 +548,17 @@ class VideoProcessor:
             # Usar la duración total del audio para el cálculo final
             total_audio_duration = project_info.get('audio_duration', 0)
 
+            # DEBUG: Log de datos de entrada
+            logger.info(f"[{project_id}] === DEBUG DURACIONES ===")
+            logger.info(f"[{project_id}] Número de escenas: {len(scenes_data)}")
+            logger.info(f"[{project_id}] Número de imágenes: {num_images}")
+            logger.info(f"[{project_id}] Duración total audio: {total_audio_duration:.3f}s")
+
+            if scenes_data:
+                logger.info(f"[{project_id}] Rango timestamps escenas:")
+                for i, scene in enumerate(scenes_data[:5]):  # Solo las primeras 5
+                    logger.info(f"[{project_id}]   Escena {i}: start={scene.get('start', 'N/A'):.3f}s, end={scene.get('end', 'N/A'):.3f}s")
+
             # **MÉTODO 1: El ideal. Calcular duraciones usando los 'start' de las escenas para incluir silencios.**
             if scenes_data and all(s.get('start') is not None for s in scenes_data) and len(scenes_data) == num_images and total_audio_duration > 0:
                 logger.info(f"[{project_id}] Calculando duraciones de escena para sincronizar con audio (incluyendo silencios).")
@@ -568,12 +575,14 @@ class VideoProcessor:
                         duration = next_scene_start - current_scene_start
                     else:
                         # Es la última escena, su duración se extiende hasta el final del audio.
-                        duration = total_audio_duration - current_scene_start
+                        # Asegurarse de que current_scene_start no exceda total_audio_duration
+                        effective_start = min(current_scene_start, total_audio_duration)
+                        duration = total_audio_duration - effective_start
                     
                     # Comprobación de seguridad para evitar duraciones negativas o cero
-                    if duration <= 0.1: # Usar un umbral pequeño
-                        logger.warning(f"[{project_id}] Duración calculada no positiva ({duration:.2f}s) para escena {i}. Usando fallback de 2 segundos.")
-                        duration = 2.0
+                    if duration <= 0: # Si es cero o negativo, significa que la escena no tiene duración real de audio
+                        logger.warning(f"[{project_id}] Duración calculada no positiva ({duration:.2f}s) para escena {i}. Estableciendo a 0.1s para evitar errores de FFmpeg y mantener sincronización.")
+                        duration = 0.1 # Un valor mínimo para que FFmpeg no falle, pero que no desincronice mucho
                     
                     scene_durations.append(duration)
                 
@@ -585,11 +594,71 @@ class VideoProcessor:
                 total_video_duration = sum(scene_durations)
                 logger.info(f"[{project_id}] Duración total del video calculada: {total_video_duration:.2f}s. Duración del audio: {total_audio_duration:.2f}s.")
                 
-                # Si la diferencia es notable, se ajusta la última escena para cuadrar perfectamente
+                # SECCIÓN CORREGIDA - Ajuste seguro de duraciones
+                total_video_duration = sum(scene_durations)
+                logger.info(f"[{project_id}] Duración total del video calculada: {total_video_duration:.2f}s. Duración del audio: {total_audio_duration:.2f}s.")
+
+                # Si la diferencia es notable, ajustar de forma segura
                 if abs(total_video_duration - total_audio_duration) > 0.1:
                     diff = total_audio_duration - total_video_duration
-                    scene_durations[-1] += diff
-                    logger.info(f"[{project_id}] Ajustando duración de la última escena en {diff:.2f}s para una sincronización perfecta.")
+                    logger.info(f"[{project_id}] Diferencia detectada: {diff:.2f}s. Ajustando duraciones de forma segura...")
+                    
+                    if diff > 0:
+                        # El video es más corto que el audio - añadir tiempo a la última escena
+                        scene_durations[-1] += diff
+                        logger.info(f"[{project_id}] Añadidos {diff:.2f}s a la última escena.")
+                    else:
+                        # El video es más largo que el audio - reducir duraciones proporcionalmente
+                        # para evitar duraciones negativas
+                        excess_time = abs(diff)
+                        logger.info(f"[{project_id}] Video {excess_time:.2f}s más largo que audio. Reduciendo proporcionalmente...")
+                        
+                        # Calcular cuánto se puede reducir de cada escena sin volverla negativa
+                        min_duration = 0.5  # Duración mínima por escena
+                        reducible_time = 0.0
+                        for duration in scene_durations:
+                            if duration > min_duration:
+                                reducible_time += (duration - min_duration)
+                        
+                        if reducible_time >= excess_time:
+                            # Se puede reducir proporcionalmente
+                            reduction_factor = excess_time / reducible_time
+                            for i in range(len(scene_durations)):
+                                if scene_durations[i] > min_duration:
+                                    reducible = scene_durations[i] - min_duration
+                                    reduction = reducible * reduction_factor
+                                    scene_durations[i] -= reduction
+                            logger.info(f"[{project_id}] Duraciones reducidas proporcionalmente (factor: {reduction_factor:.3f})")
+                        else:
+                            # No se puede reducir lo suficiente - usar distribución uniforme
+                            logger.warning(f"[{project_id}] No se puede reducir {excess_time:.2f}s sin duraciones negativas. Usando distribución uniforme.")
+                            avg_duration = total_audio_duration / len(scene_durations)
+                            scene_durations = [max(avg_duration, 0.5) for _ in scene_durations]
+                            
+                            # Ajustar la última para que coincida exactamente
+                            current_total = sum(scene_durations[:-1])
+                            scene_durations[-1] = max(total_audio_duration - current_total, 0.5)
+                            logger.info(f"[{project_id}] Aplicada distribución uniforme de {avg_duration:.2f}s por escena")
+
+                # VALIDACIÓN FINAL - Asegurar que no hay duraciones negativas o cero
+                for i, duration in enumerate(scene_durations):
+                    if duration <= 0:
+                        logger.error(f"[{project_id}] ¡DURACIÓN INVÁLIDA DETECTADA! Escena {i}: {duration:.3f}s")
+                        scene_durations[i] = 0.5  # Valor mínimo de seguridad
+                        logger.warning(f"[{project_id}] Escena {i} corregida a 0.5s")
+
+                # Log final para verificación
+                final_total = sum(scene_durations)
+                logger.info(f"[{project_id}] DURACIONES FINALES:")
+                logger.info(f"[{project_id}] Total calculado: {final_total:.2f}s")
+                logger.info(f"[{project_id}] Audio original: {total_audio_duration:.2f}s")
+                logger.info(f"[{project_id}] Diferencia final: {abs(final_total - total_audio_duration):.3f}s")
+                logger.info(f"[{project_id}] Rango duraciones: {min(scene_durations):.2f}s - {max(scene_durations):.2f}s")
+
+                # Verificación final de seguridad
+                if any(d <= 0 for d in scene_durations):
+                    logger.error(f"[{project_id}] ¡ERROR CRÍTICO! Aún hay duraciones <= 0 después de las correcciones")
+                    raise ValueError("Se detectaron duraciones negativas o cero después de todas las correcciones")
 
                 # --- INICIO DEL NUEVO BLOQUE DE CÓDIGO DE COMPENSACIÓN DE TRANSICIONES ---
                 # Ahora, pre-compensamos la duración que se perderá por las transiciones.
@@ -1035,10 +1104,10 @@ class VideoProcessor:
                      ui_opacity = overlay_ui_info[1]
                  elif isinstance(overlay_ui_info, str):
                      overlay_name = overlay_ui_info
-                     ui_opacity = 0.3
+                     ui_opacity = self.overlay_config.get('default_opacity', 0.3)
                  elif isinstance(overlay_ui_info, dict):
                      overlay_name = overlay_ui_info.get('name')
-                     ui_opacity = overlay_ui_info.get('opacity', 0.3)
+                     ui_opacity = overlay_ui_info.get('opacity', self.overlay_config.get('default_opacity', 0.3))
                  else:
                      logger.warning(f"[{project_id}] Formato de overlay no reconocido: {type(overlay_ui_info)} - {overlay_ui_info}")
                      continue

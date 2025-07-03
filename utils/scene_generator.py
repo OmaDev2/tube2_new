@@ -124,12 +124,16 @@ class SceneGenerator:
                 scene_text_final = " ".join(current_scene_text_list)
                 scene_end_time = current_scene_start_time + current_scene_accumulated_duration
                 
+                if current_scene_accumulated_duration <= 0:
+                    logger.warning(f"Duración no positiva detectada: {current_scene_accumulated_duration}s. Saltando escena.")
+                    continue
+
                 timed_scenes.append({
                     'index': scene_idx,
                     'text': scene_text_final.strip(),
                     'start': current_scene_start_time,
                     'end': scene_end_time,
-                    'duration': current_scene_accumulated_duration
+                    'duration': max(current_scene_accumulated_duration, 0.1)
                 })
                 scene_idx += 1
                 
@@ -499,58 +503,48 @@ class SceneGenerator:
             
             final_scenes_base = []
             for scene in timed_scenes:
-                # --- INICIO DE LA LÓGICA CORREGIDA ---
                 if scene['duration'] > MAX_SCENE_DURATION:
-                    logger.info(f"Escena {scene['index']} es muy larga ({scene['duration']:.1f}s > {MAX_SCENE_DURATION}s). Subdividiendo de forma robusta.")
-
-                    # 1. Encontrar todos los segmentos de la transcripción que pertenecen a esta escena larga.
-                    # Se usa una lógica de solapamiento para no perder ningún segmento.
+                    logger.info(f"Scene {scene['index']} is too long ({scene['duration']:.1f}s > {MAX_SCENE_DURATION}s). Subdividing robustly.")
+                    
+                    # Robust subdivision logic
                     scene_segments = [
-                        seg for seg in transcription_segments
+                        seg for seg in transcription_segments 
                         if seg['start'] < scene['end'] and seg['end'] > scene['start']
                     ]
-
+                    
                     if not scene_segments:
-                        logger.warning(f"No se encontraron segmentos para la escena larga {scene['index']}, no se puede subdividir. Se usará como está.")
+                        logger.warning(f"No segments found for long scene {scene['index']}. Using as is.")
                         scene_copy = scene.copy()
                         scene_copy["index"] = len(final_scenes_base)
                         final_scenes_base.append(scene_copy)
                         continue
 
-                    # 2. Determinar en cuántas sub-escenas dividir.
-                    # Se apunta a una duración ideal un poco menor que el máximo.
                     target_sub_duration = MAX_SCENE_DURATION * 0.9
                     num_sub_scenes = max(2, round(scene['duration'] / target_sub_duration))
-
-                    # 3. Dividir la *lista de segmentos* en N grupos.
-                    # Esto garantiza que todos los segmentos se distribuyen.
+                    
                     k, m = divmod(len(scene_segments), num_sub_scenes)
-                    segment_groups = [scene_segments[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(num_sub_scenes)]
-
-                    # 4. Crear sub-escenas a partir de los grupos de segmentos.
+                    segment_groups = [
+                        scene_segments[i*k+min(i, m):(i+1)*k+min(i+1, m)] 
+                        for i in range(num_sub_scenes)
+                    ]
+                    
                     for group in segment_groups:
-                        if not group:
-                            continue
-
-                        # El texto, inicio y fin se derivan directamente de los segmentos del grupo.
+                        if not group: continue
+                        
                         sub_scene_text = " ".join(s['text'].strip() for s in group)
                         sub_start_time = group[0]['start']
                         sub_end_time = group[-1]['end']
                         sub_duration = sub_end_time - sub_start_time
-
-                        if sub_duration <= 0:
-                            continue
-
-                        final_scenes_base.append({
-                            "index": len(final_scenes_base),
-                            "text": sub_scene_text,
-                            "start": sub_start_time,
-                            "end": sub_end_time,
-                            "duration": sub_duration
-                        })
-                # --- FIN DE LA LÓGICA CORREGIDA ---
+                        
+                        if sub_duration > 0:
+                            final_scenes_base.append({
+                                "index": len(final_scenes_base),
+                                "text": sub_scene_text,
+                                "start": sub_start_time,
+                                "end": sub_end_time,
+                                "duration": sub_duration
+                            })
                 else:
-                    # La escena no es demasiado larga, se añade directamente.
                     scene_copy = scene.copy()
                     scene_copy["index"] = len(final_scenes_base)
                     final_scenes_base.append(scene_copy)

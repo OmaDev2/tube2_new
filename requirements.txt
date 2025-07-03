@@ -19,3 +19,6 @@ fuzzywuzzy
 fish-audio-sdk
 httpx
 ormsgpack
+# Enhanced settings dependencies
+psutil
+GPUtil

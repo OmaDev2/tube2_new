@@ -1,5 +1,6 @@
 import streamlit as st
 from utils.overlays import OverlayManager
+from utils.config import load_config
 from typing import List, Tuple, Optional
 
 @st.cache_resource
@@ -40,12 +41,20 @@ def show_overlays_ui(key_prefix: str = "") -> List[Tuple[str, float, float, Opti
     if selected_overlays:
         st.info(f"✨ Los overlays se aplicarán secuencialmente: {' → '.join(selected_overlays)} (rotando entre clips)")
     
+    # Cargar configuración para obtener opacidad por defecto
+    try:
+        app_config = load_config()
+        overlays_config = app_config.get('video_generation', {}).get('effects', {}).get('overlays', [{}])
+        default_opacity = overlays_config[0].get('opacity', 0.3) if overlays_config else 0.3
+    except:
+        default_opacity = 0.3
+    
     # Opacidad global para todos los overlays
     opacity = st.slider(
         "Opacidad de los overlays",
         min_value=0.0,
         max_value=1.0,
-        value=0.25,
+        value=default_opacity,
         step=0.05,
         help="Controla la transparencia de todos los overlays",
         key=f"{key_prefix}overlay_opacity"
@@ -55,4 +64,4 @@ def show_overlays_ui(key_prefix: str = "") -> List[Tuple[str, float, float, Opti
     # Formato: (nombre_overlay, opacidad, tiempo_inicio, duración)
     overlay_sequence = [(name, opacity, 0, None) for name in selected_overlays]
     
-    return overlay_sequence 
+    return overlay_sequence

@@ -257,11 +257,24 @@ def show_batch_processor():
             )
             
             if img_prompt_provider == "gemini":
-                img_prompt_model = st.text_input("Modelo Gemini", "models/gemini-2.5-flash-lite-preview-06-17", key="batch_img_prompt_model")
+                default_gemini_model = app_config.get('ai', {}).get('default_models', {}).get('image_prompt_generation', 'models/gemini-1.5-flash-latest')
+                gemini_models = [
+                    "models/gemini-1.5-flash-latest",
+                    "models/gemini-1.5-pro-latest", 
+                    "models/gemini-2.5-flash-lite-preview-06-17",
+                    "gemini-pro",
+                    "gemini-pro-vision"
+                ]
+                default_index = gemini_models.index(default_gemini_model) if default_gemini_model in gemini_models else 0
+                img_prompt_model = st.selectbox("Modelo Gemini", gemini_models, index=default_index, key="batch_img_prompt_model")
             elif img_prompt_provider == "openai":
-                img_prompt_model = st.selectbox("Modelo OpenAI", ["gpt-4", "gpt-3.5-turbo", "gpt-4-turbo"], index=1, key="batch_img_prompt_model")
+                default_openai_model = app_config.get('ai', {}).get('default_models', {}).get('openai', 'gpt-4o-mini')
+                openai_models = ["gpt-4", "gpt-3.5-turbo", "gpt-4-turbo", "gpt-4o-mini"]
+                default_index = openai_models.index(default_openai_model) if default_openai_model in openai_models else 0
+                img_prompt_model = st.selectbox("Modelo OpenAI", openai_models, index=default_index, key="batch_img_prompt_model")
             else:
-                img_prompt_model = st.text_input("Modelo Ollama", "llama3.2", key="batch_img_prompt_model")
+                default_ollama_model = app_config.get('ai', {}).get('default_models', {}).get('ollama', 'llama3')
+                img_prompt_model = st.text_input("Modelo Ollama", default_ollama_model, key="batch_img_prompt_model")
             
             try:
                 prompts_img_list = list_prompts("imagenes")
@@ -338,9 +351,15 @@ def show_batch_processor():
                                     'ollama': 'Ollama (Local)'
                                 }
                                 
-                                # Priorizar Gemini si está disponible
+                                # Obtener configuración por defecto desde config.yaml
+                                historical_config = app_config.get('video_generation', {}).get('historical_analysis', {})
+                                config_default_provider = historical_config.get('default_provider', 'gemini')
+                                
+                                # Usar configuración del config.yaml si está disponible, sino priorizar Gemini
                                 default_provider_index = 0
-                                if 'gemini' in available_providers:
+                                if config_default_provider in available_providers:
+                                    default_provider_index = available_providers.index(config_default_provider)
+                                elif 'gemini' in available_providers:
                                     default_provider_index = available_providers.index('gemini')
                                 
                                 historical_ai_provider = st.selectbox(
@@ -361,10 +380,27 @@ def show_batch_processor():
                                 
                                 # Configurar modelo por defecto según el proveedor
                                 default_model_index = 0
-                                if historical_ai_provider == 'gemini' and 'models/gemini-2.5-flash-lite-preview-06-17' in available_models:
-                                    default_model_index = available_models.index('models/gemini-2.5-flash-lite-preview-06-17')
-                                elif historical_ai_provider == 'openai' and 'gpt-4' in available_models:
-                                    default_model_index = available_models.index('gpt-4')
+                                
+                                # Primero intentar usar configuración específica de análisis histórico
+                                historical_config = app_config.get('video_generation', {}).get('historical_analysis', {})
+                                config_default_model = historical_config.get('default_model', '')
+                                
+                                if config_default_model and config_default_model in available_models:
+                                    default_model_index = available_models.index(config_default_model)
+                                else:
+                                    # Fallback a configuración general por proveedor
+                                    if historical_ai_provider == 'gemini':
+                                        default_gemini_model = app_config.get('ai', {}).get('default_models', {}).get('gemini', 'models/gemini-1.5-flash-latest')
+                                        if default_gemini_model in available_models:
+                                            default_model_index = available_models.index(default_gemini_model)
+                                    elif historical_ai_provider == 'openai':
+                                        default_openai_model = app_config.get('ai', {}).get('default_models', {}).get('openai', 'gpt-4o-mini')
+                                        if default_openai_model in available_models:
+                                            default_model_index = available_models.index(default_openai_model)
+                                    elif historical_ai_provider == 'ollama':
+                                        default_ollama_model = app_config.get('ai', {}).get('default_models', {}).get('ollama', 'llama3')
+                                        if default_ollama_model in available_models:
+                                            default_model_index = available_models.index(default_ollama_model)
                                 
                                 historical_ai_model = st.selectbox(
                                     "Modelo", 
@@ -373,7 +409,8 @@ def show_batch_processor():
                                     key="batch_historical_ai_model"
                                 )
                             else:
-                                historical_ai_model = 'models/gemini-2.5-flash-lite-preview-06-17'  # Fallback
+                                default_gemini_model = app_config.get('ai', {}).get('default_models', {}).get('gemini', 'models/gemini-1.5-flash-latest')
+                                historical_ai_model = default_gemini_model  # Fallback
                         
                         # Configuración automática con LLM seleccionado
                         historical_config = {
@@ -498,8 +535,10 @@ def show_batch_processor():
                         
                         # Configurar modelo por defecto según el proveedor
                         default_model_index = 0
-                        if selected_provider == 'gemini' and 'models/gemini-2.5-flash-lite-preview-06-17' in available_models:
-                            default_model_index = available_models.index('models/gemini-2.5-flash-lite-preview-06-17')
+                        if selected_provider == 'gemini':
+                            default_gemini_model = app_config.get('ai', {}).get('default_models', {}).get('gemini', 'models/gemini-1.5-flash-latest')
+                            if default_gemini_model in available_models:
+                                default_model_index = available_models.index(default_gemini_model)
                         
                         optimization_config['optimization_model'] = st.selectbox(
                             "Modelo", 
@@ -508,7 +547,8 @@ def show_batch_processor():
                             key="batch_opt_model"
                         )
                     else:
-                        optimization_config['optimization_model'] = 'gpt-3.5-turbo'  # Fallback
+                        default_openai_model = app_config.get('ai', {}).get('default_models', {}).get('openai', 'gpt-4o-mini')
+                        optimization_config['optimization_model'] = default_openai_model  # Fallback
                 
                 with col_opt3:
                     optimization_config['use_same_style'] = st.checkbox(
@@ -526,8 +566,9 @@ def show_batch_processor():
             else:
                 st.warning("⚠️ **No hay proveedores de IA configurados**")
                 st.info("Ve a la página de **Configuración** para configurar al menos un proveedor (OpenAI, Gemini o Ollama)")
+                default_provider = app_config.get('ai', {}).get('default_models', {}).get('openai', 'gpt-4o-mini')
                 optimization_config['optimization_provider'] = 'openai'  # Fallback
-                optimization_config['optimization_model'] = 'gpt-3.5-turbo'  # Fallback
+                optimization_config['optimization_model'] = default_provider  # Fallback
     
     # ===== SECCIÓN 3: CONFIGURACIÓN DE CONTENIDO =====
     st.header("3. 🎬 Configuración de Contenido")
@@ -680,7 +721,7 @@ def show_batch_processor():
     
     # CONFIGURACIÓN DE SUBTÍTULOS
     with st.expander("📝 Configuración de Subtítulos", expanded=True):
-        subtitles_config = _render_batch_subtitles_config()
+        subtitles_config = _render_batch_subtitles_config(app_config)
 
     # ===== SECCIÓN 5: PROCESAR BATCH =====
     st.header("5. 🎬 Procesar Batch")
@@ -922,7 +963,8 @@ def procesar_proyecto_individual(proyecto, batch_config, progress_callback):
                     from utils.ai_services import extract_historical_context
                     
                     ai_provider = historical_config.get("ai_provider", "gemini")
-                    ai_model = historical_config.get("ai_model", "models/gemini-2.5-flash-lite-preview-06-17")
+                    default_gemini_model = app_config.get('ai', {}).get('default_models', {}).get('gemini', 'models/gemini-1.5-flash-latest')
+                    ai_model = historical_config.get("ai_model", default_gemini_model)
                     
                     progress_callback(0.08, f"🤖 Extrayendo contexto histórico con {ai_provider}...")
                     
@@ -1163,11 +1205,20 @@ def _render_batch_audio_config(app_config):
     # --- SELECCIÓN DE PROVEEDOR TTS ---
     st.markdown("**🎤 Síntesis de Voz (TTS)**")
     
+    # Obtener configuración TTS desde config.yaml
+    tts_defaults = app_config.get('tts', {})
+    default_provider = tts_defaults.get('default_provider', 'edge')
+    
     # Seleccionar proveedor TTS
+    provider_options = ["Edge TTS", "Fish Audio"]
+    provider_mapping = {"edge": "Edge TTS", "fish_audio": "Fish Audio"}
+    default_provider_ui = provider_mapping.get(default_provider, "Edge TTS")
+    provider_index = provider_options.index(default_provider_ui) if default_provider_ui in provider_options else 0
+    
     tts_provider = st.selectbox(
         "Proveedor TTS",
-        ["Edge TTS", "Fish Audio"],
-        index=1,  # Fish Audio por defecto
+        provider_options,
+        index=provider_index,
         key="batch_tts_provider",
         help="Edge TTS: Gratuito, voces de Microsoft. Fish Audio: Calidad premium, requiere API key."
     )
@@ -1198,11 +1249,19 @@ def _render_batch_audio_config(app_config):
             tts_voice = nombres_completos[nombres_cortos.index(selected_voice_short)]
              
         with col_voz2:
-            tts_speed_percent = st.slider("Velocidad (%)", -50, 50, -5, 1, key="batch_tts_speed")
+            edge_defaults = tts_defaults.get('edge', {})
+            default_rate = edge_defaults.get('default_rate', '+0%')
+            # Convertir formato +X% a número
+            rate_value = int(default_rate.replace('%', '').replace('+', '')) if default_rate != '+0%' else 0
+            tts_speed_percent = st.slider("Velocidad (%)", -50, 50, rate_value, 1, key="batch_tts_speed")
         with col_voz3:
-            tts_pitch_hz = st.slider("Tono (Hz)", -50, 50, -5, 1, key="batch_tts_pitch")
+            default_pitch = edge_defaults.get('default_pitch', '+0Hz')
+            # Convertir formato +XHz a número
+            pitch_value = int(default_pitch.replace('Hz', '').replace('+', '')) if default_pitch != '+0Hz' else 0
+            tts_pitch_hz = st.slider("Tono (Hz)", -50, 50, pitch_value, 1, key="batch_tts_pitch")
         with col_voz4:
-            tts_volume = st.slider("Volumen Voz", 0.0, 2.0, 1.0, 0.1, key="batch_tts_volume")
+            default_volume = app_config.get('video_generation', {}).get('audio', {}).get('default_voice_volume', 1.0)
+            tts_volume = st.slider("Volumen Voz", 0.0, 2.0, default_volume, 0.1, key="batch_tts_volume")
         
         # Configuración para Edge TTS
         tts_config = {
@@ -1253,34 +1312,43 @@ def _render_batch_audio_config(app_config):
             )
             
             # Bitrate para MP3
+            fish_defaults = tts_defaults.get('fish_audio', {})
+            default_bitrate = fish_defaults.get('default_mp3_bitrate', 128)
+            bitrate_options = [64, 128, 192]
+            bitrate_index = bitrate_options.index(default_bitrate) if default_bitrate in bitrate_options else 1
             fish_bitrate = st.selectbox(
                 "Bitrate MP3",
-                [64, 128, 192],
-                index=1,  # 128 por defecto
+                bitrate_options,
+                index=bitrate_index,
                 key="batch_fish_bitrate",
                 disabled=(fish_format != "mp3")
             )
         
         with col2:
             # Latencia
+            default_latency = fish_defaults.get('default_latency', 'normal')
+            latency_options = ["normal", "balanced"]
+            latency_index = latency_options.index(default_latency) if default_latency in latency_options else 0
             fish_latency = st.selectbox(
                 "Latencia",
-                ["normal", "balanced"],
-                index=0,
+                latency_options,
+                index=latency_index,
                 key="batch_fish_latency",
                 help="Normal: Mayor estabilidad. Balanced: Menor latencia (300ms)"
             )
             
             # Normalizar texto
+            default_normalize = fish_defaults.get('default_normalize', True)
             fish_normalize = st.checkbox(
                 "Normalizar texto",
-                True,
+                default_normalize,
                 key="batch_fish_normalize",
                 help="Mejora la estabilidad para números y texto en inglés/chino"
             )
             
             # Volumen
-            tts_volume = st.slider("Volumen Voz", 0.0, 2.0, 1.0, 0.1, key="batch_tts_volume")
+            default_volume = app_config.get('video_generation', {}).get('audio', {}).get('default_voice_volume', 1.0)
+            tts_volume = st.slider("Volumen Voz", 0.0, 2.0, default_volume, 0.1, key="batch_tts_volume")
         
         # Configuración para Fish Audio
         tts_config = {
@@ -1300,11 +1368,25 @@ def _render_batch_audio_config(app_config):
     with col_music1:
         bg_music_folder = Path("background_music")
         available_music = ["**Ninguna**"] + ([f.name for f in bg_music_folder.iterdir() if f.suffix.lower() in ['.mp3', '.wav']] if bg_music_folder.exists() else [])
-        sel_music = st.selectbox("Música Fondo", available_music, key="batch_bg_music")
+        
+        # Obtener música por defecto desde config.yaml
+        audio_defaults = app_config.get('video_generation', {}).get('audio', {})
+        default_bg_music = audio_defaults.get('background_music', '')
+        default_music_name = Path(default_bg_music).name if default_bg_music else None
+        
+        # Establecer índice por defecto
+        default_index = 0  # "**Ninguna**" por defecto
+        if default_music_name and default_music_name in available_music:
+            default_index = available_music.index(default_music_name)
+        
+        sel_music = st.selectbox("Música Fondo", available_music, index=default_index, key="batch_bg_music")
         bg_music_selection = str(bg_music_folder / sel_music) if sel_music != "**Ninguna**" else None
         
     with col_music2:
-        music_volume = st.slider("Volumen Música", 0.0, 1.0, 0.06, 0.01, "%.2f", key="batch_music_vol", disabled=(not bg_music_selection))
+        # Obtener configuración de audio desde config.yaml
+        audio_defaults = app_config.get('video_generation', {}).get('audio', {})
+        default_music_volume = audio_defaults.get('default_music_volume', 0.08)
+        music_volume = st.slider("Volumen Música", 0.0, 1.0, default_music_volume, 0.01, "%.2f", key="batch_music_vol", disabled=(not bg_music_selection))
         music_loop = st.checkbox("Loop Música", True, key="batch_music_loop", disabled=(not bg_music_selection))
 
     # Combinar configuración TTS con música
@@ -1317,33 +1399,40 @@ def _render_batch_audio_config(app_config):
     
     return audio_config
 
-def _render_batch_subtitles_config():
-    """Configuración de subtítulos específica para batch (sin duplicaciones de UI)"""
+def _render_batch_subtitles_config(app_config):
+    """Configuración de subtítulos específica para batch usando valores de config.yaml como defaults"""
+    
+    # Obtener configuración de subtítulos desde config.yaml
+    subtitles_defaults = app_config.get('video_generation', {}).get('subtitles', {})
     
     sub_config = {}
-    sub_config['enable'] = st.checkbox("Incrustar Subtítulos", True, key="batch_sub_enable")
+    sub_config['enable'] = st.checkbox("Incrustar Subtítulos", subtitles_defaults.get('enable', True), key="batch_sub_enable")
     
     if sub_config['enable']:
         col1, col2, col3 = st.columns(3)
         with col1:
             try:
                 available_fonts = get_available_fonts()
-                default_font = "Impact"
+                default_font = subtitles_defaults.get('font', 'Arial')
                 font_index = available_fonts.index(default_font) if default_font in available_fonts else 0
             except:
                 available_fonts = ["Arial", "Helvetica", "Times New Roman", "Calibri", "Impact"]
-                font_index = 4 if "Impact" in available_fonts else 0
+                default_font = subtitles_defaults.get('font', 'Arial')
+                font_index = available_fonts.index(default_font) if default_font in available_fonts else 0
                 
             sub_config['font'] = st.selectbox("Fuente", available_fonts, index=font_index, key="batch_sub_font")
-            sub_config['size'] = st.slider("Tamaño", 16, 72, 64, key="batch_sub_size")
+            sub_config['size'] = st.slider("Tamaño", 16, 72, subtitles_defaults.get('font_size', 24), key="batch_sub_size")
         with col2:
-            sub_config['color'] = st.color_picker("Color Texto", "#FFFFFF", key="batch_sub_color")
-            sub_config['stroke_color'] = st.color_picker("Color Borde", "#000000", key="batch_sub_stroke_color")
+            sub_config['color'] = st.color_picker("Color Texto", subtitles_defaults.get('font_color', '#FFFFFF'), key="batch_sub_color")
+            sub_config['stroke_color'] = st.color_picker("Color Borde", subtitles_defaults.get('stroke_color', '#000000'), key="batch_sub_stroke_color")
         with col3:
-            sub_config['stroke_width'] = st.slider("Grosor Borde", 0, 5, 2, key="batch_sub_stroke_width")
-            sub_config['position'] = st.selectbox("Posición", ["bottom", "center", "top"], index=0, key="batch_sub_pos")
+            sub_config['stroke_width'] = st.slider("Grosor Borde", 0, 5, int(subtitles_defaults.get('stroke_width', 1.5)), key="batch_sub_stroke_width")
+            position_options = ["bottom", "center", "top"]
+            default_position = subtitles_defaults.get('position', 'bottom')
+            position_index = position_options.index(default_position) if default_position in position_options else 0
+            sub_config['position'] = st.selectbox("Posición", position_options, index=position_index, key="batch_sub_pos")
             
-        sub_config['max_words'] = st.slider("Máx. Palabras por Segmento", 1, 10, 7, key="batch_sub_max_words")
+        sub_config['max_words'] = st.slider("Máx. Palabras por Segmento", 1, 10, subtitles_defaults.get('max_words', 7), key="batch_sub_max_words")
         st.caption("Controla cuántas palabras aparecen juntas en pantalla.")
         
-    return sub_config 
+    return sub_config

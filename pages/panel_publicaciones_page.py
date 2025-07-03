@@ -15,6 +15,20 @@ from utils.database_manager import DatabaseManager
 
 # --- Función Principal de la Página ---
 def render_panel_publicaciones(app_config: Dict):
+    # Importar la versión mejorada
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).parent.parent))
+        from tmp_rovodev_enhanced_publications import render_enhanced_panel_publicaciones
+        
+        # Usar la versión mejorada
+        render_enhanced_panel_publicaciones(app_config)
+        return
+    except ImportError:
+        pass
+    
+    # Fallback a la versión original
     st.title("🗓️ Panel de Publicaciones")
     st.markdown("""
     Aquí puedes planificar, generar y gestionar el estado de tus vídeos para cada canal.

@@ -1,14 +1,14 @@
 ai:
-  openai_api_key: TU_CLAVE_OPENAI_AQUI
-  gemini_api_key: TU_CLAVE_GEMINI_AQUI
-  replicate_api_key: TU_CLAVE_REPLICATE_AQUI
+  openai_api_key: ''
+  gemini_api_key: ''
+  replicate_api_key: ''
   ollama_base_url: http://localhost:11434
   default_models:
     openai: gpt-4o-mini
-    gemini: models/gemini-1.5-flash-latest
+    gemini: models/gemini-2.5-flash-lite-preview-06-17
     ollama: llama3
     image_generation: black-forest-labs/flux-schnell
-    image_prompt_generation: models/gemini-1.5-flash-latest
+    image_prompt_generation: models/gemini-2.5-flash-lite-preview-06-17
     default_voice: es-ES-AlvaroNeural
 tts:
   default_provider: fish
@@ -17,13 +17,13 @@ tts:
     default_rate: +0%
     default_pitch: +0Hz
   fish_audio:
-    api_key: TU_CLAVE_FISH_AUDIO_AQUI
+    api_key: ''
     default_model: speech-1.6
     default_format: mp3
     default_mp3_bitrate: 128
     default_normalize: true
     default_latency: normal
-    reference_id: TU_REFERENCE_ID_AQUI
+    reference_id: 8d2c17a9b26d4d83888ea67a1ee565b2
 video_generation:
   quality:
     resolution: 1920x1080
@@ -41,10 +41,10 @@ video_generation:
   subtitles:
     enable: true
     font: Impact
-    font_size: 64
+    font_size: 50
     font_color: '#FFFFFF'
     stroke_color: '#000000'
-    stroke_width: 1.5
+    stroke_width: 2.0
     position: bottom
     max_words: 7
     outline_color: '#000000'
@@ -52,20 +52,24 @@ video_generation:
     default_type: dissolve
     default_duration: 1.0
   audio:
-    default_music_volume: 0.08
+    default_music_volume: 0.06
     normalize_audio: true
-    background_music: background_music/Yoga Style - Chris Haugen.mp3
+    default_voice_volume: 1.0
+    background_music: background_music/Magnetic Lullaby - Amulets.mp3
     normalize_volume: true
     match_video_duration: true
   effects:
     overlays:
     - name: overlays/sparkes_vonv_lossy.webm
-      opacity: 0.3
+      opacity: 0.25
       position: center
       loop: true
   batch_processing:
     max_parallel_videos: 3
     auto_cleanup: true
+  historical_analysis:
+    default_provider: gemini
+    default_model: models/gemini-2.5-flash-lite-preview-06-17
 transcription:
   service_type: replicate
   local:

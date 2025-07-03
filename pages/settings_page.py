@@ -1,7 +1,754 @@
 # pages/settings_page.py
 import streamlit as st
+import os
+import json
+import yaml
 from pathlib import Path
-from utils.config import load_config, save_config
+from datetime import datetime
+from typing import Dict, Any, Tuple, List
+import requests
+
+# Importaciones locales
+from utils.config import load_config, save_config, save_config_with_api_keys
+
+# Importar las nuevas clases de validación y backup
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+
+try:
+    from tmp_rovodev_settings_enhanced import (
+        ConfigValidator, ConfigBackupManager, ConfigStatusDashboard,
+        render_video_configuration_tab, render_backup_restore_section
+    )
+except ImportError:
+    # Fallback si no se puede importar
+    class ConfigValidator:
+        @staticmethod
+        def validate_api_key(service: str, api_key: str):
+            """Valida una API key específica"""
+            if not api_key or api_key.strip() == "":
+                return False, "API key vacía"
+            
+            try:
+                if service == "openai":
+                    return ConfigValidator._validate_openai_key(api_key)
+                elif service == "gemini":
+                    return ConfigValidator._validate_gemini_key(api_key)
+                elif service == "replicate":
+                    return ConfigValidator._validate_replicate_key(api_key)
+                elif service == "fish_audio":
+                    return ConfigValidator._validate_fish_audio_key(api_key)
+                else:
+                    return True, "Servicio no soportado para validación"
+            except Exception as e:
+                return False, f"Error validando: {str(e)}"
+        
+        @staticmethod
+        def _validate_openai_key(api_key: str):
+            """Valida API key de OpenAI"""
+            try:
+                import openai
+                client = openai.OpenAI(api_key=api_key)
+                # Hacer una llamada simple para verificar
+                response = client.models.list()
+                return True, "✅ API key válida"
+            except Exception as e:
+                return False, f"❌ API key inválida: {str(e)}"
+        
+        @staticmethod
+        def _validate_gemini_key(api_key: str):
+            """Valida API key de Gemini"""
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                # Intentar listar modelos
+                models = list(genai.list_models())
+                return True, "✅ API key válida"
+            except Exception as e:
+                return False, f"❌ API key inválida: {str(e)}"
+        
+        @staticmethod
+        def _validate_replicate_key(api_key: str):
+            """Valida API key de Replicate"""
+            try:
+                headers = {"Authorization": f"Token {api_key}"}
+                response = requests.get("https://api.replicate.com/v1/account", headers=headers, timeout=10)
+                if response.status_code == 200:
+                    return True, "✅ API key válida"
+                else:
+                    return False, f"❌ API key inválida: {response.status_code}"
+            except Exception as e:
+                return False, f"❌ Error validando: {str(e)}"
+        
+        @staticmethod
+        def _validate_fish_audio_key(api_key: str):
+            """Valida API key de Fish Audio"""
+            try:
+                from fish_audio_sdk import Session
+                session = Session(api_key)
+                return True, "✅ API key configurada"
+            except Exception as e:
+                return False, f"❌ Error validando: {str(e)}"
+        
+        @staticmethod
+        def validate_directory(path: str):
+            """Valida que un directorio existe o puede ser creado"""
+            try:
+                path_obj = Path(path)
+                if path_obj.exists():
+                    if path_obj.is_dir():
+                        return True, "✅ Directorio existe"
+                    else:
+                        return False, "❌ La ruta existe pero no es un directorio"
+                else:
+                    # Intentar crear el directorio
+                    path_obj.mkdir(parents=True, exist_ok=True)
+                    return True, "✅ Directorio creado"
+            except Exception as e:
+                return False, f"❌ Error con directorio: {str(e)}"
+        
+        @staticmethod
+        def validate_ollama_connection(base_url: str):
+            """Valida conexión con Ollama"""
+            try:
+                response = requests.get(f"{base_url}/api/tags", timeout=5)
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    return True, f"✅ Conectado - {len(models)} modelos disponibles"
+                else:
+                    return False, f"❌ Error de conexión: {response.status_code}"
+            except Exception as e:
+                return False, f"❌ No se puede conectar: {str(e)}"
+    
+    class ConfigStatusDashboard:
+        @staticmethod
+        def render_status_dashboard(config):
+            """Renderiza el dashboard de estado"""
+            st.subheader("📊 Estado de Configuraciones")
+            
+            # Crear métricas de estado
+            col1, col2, col3, col4 = st.columns(4)
+            
+            # Estado de APIs
+            api_status = ConfigStatusDashboard._check_api_status(config)
+            with col1:
+                api_count = len([k for k, v in api_status.items() if v["valid"]])
+                total_apis = len(api_status)
+                st.metric(
+                    "🔑 APIs Configuradas",
+                    f"{api_count}/{total_apis}",
+                    f"{(api_count/total_apis)*100:.0f}%" if total_apis > 0 else "0%"
+                )
+            
+            # Estado de directorios
+            dir_status = ConfigStatusDashboard._check_directories_status(config)
+            with col2:
+                dir_count = len([k for k, v in dir_status.items() if v["valid"]])
+                total_dirs = len(dir_status)
+                st.metric(
+                    "📁 Directorios",
+                    f"{dir_count}/{total_dirs}",
+                    f"{(dir_count/total_dirs)*100:.0f}%" if total_dirs > 0 else "0%"
+                )
+            
+            # Estado de servicios
+            service_status = ConfigStatusDashboard._check_services_status(config)
+            with col3:
+                service_count = len([k for k, v in service_status.items() if v["available"]])
+                total_services = len(service_status)
+                st.metric(
+                    "🛠️ Servicios",
+                    f"{service_count}/{total_services}",
+                    f"{(service_count/total_services)*100:.0f}%" if total_services > 0 else "0%"
+                )
+            
+            # Configuración completa
+            with col4:
+                total_valid = api_count + dir_count + service_count
+                total_items = total_apis + total_dirs + total_services
+                overall_percentage = (total_valid / total_items * 100) if total_items > 0 else 0
+                st.metric(
+                    "✅ Configuración General",
+                    f"{overall_percentage:.0f}%",
+                    "Completa" if overall_percentage >= 80 else "Incompleta"
+                )
+            
+            # Detalles expandibles
+            with st.expander("🔍 Ver Detalles de Estado"):
+                ConfigStatusDashboard._render_detailed_status(api_status, dir_status, service_status)
+        
+        @staticmethod
+        def _check_api_status(config):
+            """Verifica el estado de las APIs"""
+            ai_config = config.get("ai", {})
+            tts_config = config.get("tts", {})
+            
+            apis = {
+                "OpenAI": {
+                    "key": ai_config.get("openai_api_key", ""),
+                    "valid": False,
+                    "message": ""
+                },
+                "Gemini": {
+                    "key": ai_config.get("gemini_api_key", ""),
+                    "valid": False,
+                    "message": ""
+                },
+                "Replicate": {
+                    "key": ai_config.get("replicate_api_key", ""),
+                    "valid": False,
+                    "message": ""
+                },
+                "Fish Audio": {
+                    "key": tts_config.get("fish_audio", {}).get("api_key", ""),
+                    "valid": False,
+                    "message": ""
+                }
+            }
+            
+            # Verificar cada API (sin hacer llamadas reales para no consumir cuota)
+            for name, info in apis.items():
+                if info["key"] and info["key"].strip():
+                    apis[name]["valid"] = True
+                    apis[name]["message"] = "✅ Configurada"
+                else:
+                    apis[name]["message"] = "❌ No configurada"
+            
+            return apis
+        
+        @staticmethod
+        def _check_directories_status(config):
+            """Verifica el estado de los directorios"""
+            directories = {
+                "Output": config.get("output_dir", ""),
+                "Projects": config.get("projects_dir", ""),
+                "Temp": config.get("temp_dir", ""),
+                "Background Music": config.get("background_music_dir", "")
+            }
+            
+            # Agregar directorios de video si existen
+            video_paths = config.get("video_generation", {}).get("paths", {})
+            for key, path in video_paths.items():
+                if path:
+                    directories[key.replace("_", " ").title()] = path
+            
+            status = {}
+            for name, path in directories.items():
+                if path:
+                    valid, message = ConfigValidator.validate_directory(path)
+                    status[name] = {
+                        "path": path,
+                        "valid": valid,
+                        "message": message
+                    }
+                else:
+                    status[name] = {
+                        "path": "",
+                        "valid": False,
+                        "message": "❌ No configurado"
+                    }
+            
+            return status
+        
+        @staticmethod
+        def _check_services_status(config):
+            """Verifica el estado de los servicios"""
+            services = {}
+            
+            # Ollama
+            ollama_url = config.get("ai", {}).get("ollama_base_url", "")
+            if ollama_url:
+                valid, message = ConfigValidator.validate_ollama_connection(ollama_url)
+                services["Ollama"] = {
+                    "available": valid,
+                    "message": message,
+                    "url": ollama_url
+                }
+            
+            # Fish Audio SDK
+            try:
+                import fish_audio_sdk
+                services["Fish Audio SDK"] = {
+                    "available": True,
+                    "message": "✅ SDK disponible"
+                }
+            except ImportError:
+                services["Fish Audio SDK"] = {
+                    "available": False,
+                    "message": "❌ SDK no instalado"
+                }
+            
+            # Replicate
+            try:
+                import replicate
+                services["Replicate SDK"] = {
+                    "available": True,
+                    "message": "✅ SDK disponible"
+                }
+            except ImportError:
+                services["Replicate SDK"] = {
+                    "available": False,
+                    "message": "❌ SDK no instalado"
+                }
+            
+            return services
+        
+        @staticmethod
+        def _render_detailed_status(api_status, dir_status, service_status):
+            """Renderiza los detalles de estado"""
+            
+            # APIs
+            st.write("**🔑 Estado de APIs:**")
+            for name, info in api_status.items():
+                icon = "✅" if info["valid"] else "❌"
+                st.write(f"{icon} **{name}**: {info['message']}")
+            
+            st.divider()
+            
+            # Directorios
+            st.write("**📁 Estado de Directorios:**")
+            for name, info in dir_status.items():
+                icon = "✅" if info["valid"] else "❌"
+                st.write(f"{icon} **{name}**: `{info['path']}` - {info['message']}")
+            
+            st.divider()
+            
+            # Servicios
+            st.write("**🛠️ Estado de Servicios:**")
+            for name, info in service_status.items():
+                icon = "✅" if info["available"] else "❌"
+                st.write(f"{icon} **{name}**: {info['message']}")
+    
+    class ConfigBackupManager:
+        """Clase para manejar backups de configuración"""
+        
+        def __init__(self):
+            self.backup_dir = Path("config_backups")
+            self.backup_dir.mkdir(exist_ok=True)
+        
+        def create_backup(self, config, name: str = None) -> str:
+            """Crea un backup de la configuración"""
+            if not name:
+                name = f"config_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+            backup_file = self.backup_dir / f"{name}.json"
+            
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False, default=str)
+            
+            return str(backup_file)
+        
+        def list_backups(self):
+            """Lista todos los backups disponibles"""
+            backups = []
+            for backup_file in self.backup_dir.glob("*.json"):
+                try:
+                    stat = backup_file.stat()
+                    backups.append({
+                        "name": backup_file.stem,
+                        "file": str(backup_file),
+                        "size": stat.st_size,
+                        "modified": datetime.fromtimestamp(stat.st_mtime)
+                    })
+                except Exception:
+                    continue
+            
+            return sorted(backups, key=lambda x: x["modified"], reverse=True)
+        
+        def restore_backup(self, backup_file: str):
+            """Restaura un backup"""
+            with open(backup_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        def delete_backup(self, backup_file: str) -> bool:
+            """Elimina un backup"""
+            try:
+                Path(backup_file).unlink()
+                return True
+            except Exception:
+                return False
+    
+    def render_video_configuration_tab(config):
+        """Renderiza la pestaña completa de configuración de video"""
+        st.header("🎥 Configuración de Generación de Video")
+        
+        # Inicializar configuración de video si no existe
+        if "video_generation" not in config:
+            config["video_generation"] = {
+                "quality": {
+                    "resolution": "1920x1080",
+                    "fps": 24,
+                    "bitrate": "5000k",
+                    "audio_bitrate": "192k"
+                },
+                "paths": {
+                    "projects_dir": "projects",
+                    "assets_dir": "overlays",
+                    "output_dir": "output",
+                    "background_music_dir": "background_music"
+                },
+                "subtitles": {
+                    "enable": True,
+                    "font": "Arial",
+                    "font_size": 24,
+                    "font_color": "#FFFFFF",
+                    "stroke_color": "#000000",
+                    "stroke_width": 1.5,
+                    "position": "bottom",
+                    "max_words": 7
+                },
+                "transitions": {
+                    "default_type": "dissolve",
+                    "default_duration": 1.0
+                },
+                "audio": {
+                    "default_music_volume": 0.08,
+                    "normalize_audio": True
+                }
+            }
+        
+        video_config = config["video_generation"]
+        
+        # Configuración de Calidad
+        st.subheader("🎯 Calidad de Video")
+        quality_config = video_config.get("quality", {})
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Resolución
+            resolution_options = [
+                "1920x1080", "1280x720", "3840x2160", "2560x1440", "1366x768"
+            ]
+            current_resolution = quality_config.get("resolution", "1920x1080")
+            if current_resolution not in resolution_options:
+                resolution_options.append(current_resolution)
+            
+            quality_config["resolution"] = st.selectbox(
+                "Resolución",
+                resolution_options,
+                index=resolution_options.index(current_resolution),
+                help="Resolución del video de salida"
+            )
+            
+            # FPS
+            quality_config["fps"] = st.selectbox(
+                "FPS (Frames por Segundo)",
+                [24, 25, 30, 60],
+                index=[24, 25, 30, 60].index(quality_config.get("fps", 24)),
+                help="Frames por segundo del video"
+            )
+        
+        with col2:
+            # Bitrate de video
+            quality_config["bitrate"] = st.text_input(
+                "Bitrate de Video",
+                value=quality_config.get("bitrate", "5000k"),
+                help="Bitrate del video (ej: 5000k, 8000k)"
+            )
+            
+            # Bitrate de audio
+            quality_config["audio_bitrate"] = st.text_input(
+                "Bitrate de Audio",
+                value=quality_config.get("audio_bitrate", "192k"),
+                help="Bitrate del audio (ej: 128k, 192k, 320k)"
+            )
+        
+        video_config["quality"] = quality_config
+        
+        st.divider()
+        
+        # Configuración de Subtítulos
+        st.subheader("📝 Configuración de Subtítulos")
+        subtitle_config = video_config.get("subtitles", {})
+        
+        # Habilitar subtítulos
+        subtitle_config["enable"] = st.checkbox(
+            "Habilitar Subtítulos",
+            value=subtitle_config.get("enable", True),
+            help="Activar o desactivar la generación de subtítulos"
+        )
+        
+        if subtitle_config["enable"]:
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Fuente
+                subtitle_config["font"] = st.text_input(
+                    "Fuente",
+                    value=subtitle_config.get("font", "Arial"),
+                    help="Nombre de la fuente para subtítulos"
+                )
+                
+                # Tamaño de fuente
+                subtitle_config["font_size"] = st.slider(
+                    "Tamaño de Fuente",
+                    min_value=12,
+                    max_value=72,
+                    value=subtitle_config.get("font_size", 24),
+                    help="Tamaño de la fuente en píxeles"
+                )
+            
+            with col2:
+                # Color de fuente
+                subtitle_config["font_color"] = st.color_picker(
+                    "Color de Fuente",
+                    value=subtitle_config.get("font_color", "#FFFFFF"),
+                    help="Color del texto de los subtítulos"
+                )
+                
+                # Color del borde
+                subtitle_config["stroke_color"] = st.color_picker(
+                    "Color del Borde",
+                    value=subtitle_config.get("stroke_color", "#000000"),
+                    help="Color del borde del texto"
+                )
+            
+            with col3:
+                # Ancho del borde
+                subtitle_config["stroke_width"] = st.slider(
+                    "Ancho del Borde",
+                    min_value=0.0,
+                    max_value=5.0,
+                    value=float(subtitle_config.get("stroke_width", 1.5)),
+                    step=0.1,
+                    help="Ancho del borde en píxeles"
+                )
+                
+                # Posición
+                subtitle_config["position"] = st.selectbox(
+                    "Posición",
+                    ["bottom", "top", "center"],
+                    index=["bottom", "top", "center"].index(subtitle_config.get("position", "bottom")),
+                    help="Posición de los subtítulos en el video"
+                )
+            
+            # Máximo de palabras por línea
+            subtitle_config["max_words"] = st.slider(
+                "Máximo de Palabras por Línea",
+                min_value=3,
+                max_value=15,
+                value=subtitle_config.get("max_words", 7),
+                help="Número máximo de palabras por línea de subtítulo"
+            )
+        
+        video_config["subtitles"] = subtitle_config
+        
+        st.divider()
+        
+        # Configuración de Transiciones
+        st.subheader("🔄 Configuración de Transiciones")
+        transition_config = video_config.get("transitions", {})
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Tipo de transición por defecto
+            transition_types = [
+                "dissolve", "fade", "slide_left", "slide_right", 
+                "slide_up", "slide_down", "zoom_in", "zoom_out"
+            ]
+            current_transition = transition_config.get("default_type", "dissolve")
+            if current_transition not in transition_types:
+                transition_types.append(current_transition)
+            
+            transition_config["default_type"] = st.selectbox(
+                "Tipo de Transición por Defecto",
+                transition_types,
+                index=transition_types.index(current_transition),
+                help="Tipo de transición que se usará por defecto entre escenas"
+            )
+        
+        with col2:
+            # Duración de transición
+            transition_config["default_duration"] = st.slider(
+                "Duración de Transición (segundos)",
+                min_value=0.1,
+                max_value=3.0,
+                value=float(transition_config.get("default_duration", 1.0)),
+                step=0.1,
+                help="Duración por defecto de las transiciones"
+            )
+        
+        video_config["transitions"] = transition_config
+        
+        st.divider()
+        
+        # Configuración de Audio
+        st.subheader("🎵 Configuración de Audio")
+        audio_config = video_config.get("audio", {})
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Volumen de música de fondo
+            audio_config["default_music_volume"] = st.slider(
+                "Volumen de Música de Fondo",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(audio_config.get("default_music_volume", 0.08)),
+                step=0.01,
+                help="Volumen por defecto de la música de fondo (0.0 = silencio, 1.0 = máximo)"
+            )
+        
+        with col2:
+            # Normalizar audio
+            audio_config["normalize_audio"] = st.checkbox(
+                "Normalizar Audio",
+                value=audio_config.get("normalize_audio", True),
+                help="Normalizar el volumen del audio para mantener consistencia"
+            )
+        
+        video_config["audio"] = audio_config
+        
+        st.divider()
+        
+        # Configuración de Rutas
+        st.subheader("📁 Rutas de Archivos")
+        paths_config = video_config.get("paths", {})
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            paths_config["projects_dir"] = st.text_input(
+                "Directorio de Proyectos",
+                value=paths_config.get("projects_dir", "projects"),
+                help="Directorio donde se guardan los proyectos"
+            )
+            
+            paths_config["output_dir"] = st.text_input(
+                "Directorio de Salida",
+                value=paths_config.get("output_dir", "output"),
+                help="Directorio donde se guardan los videos generados"
+            )
+        
+        with col2:
+            paths_config["assets_dir"] = st.text_input(
+                "Directorio de Assets",
+                value=paths_config.get("assets_dir", "overlays"),
+                help="Directorio con overlays y elementos gráficos"
+            )
+            
+            paths_config["background_music_dir"] = st.text_input(
+                "Directorio de Música",
+                value=paths_config.get("background_music_dir", "background_music"),
+                help="Directorio con archivos de música de fondo"
+            )
+        
+        video_config["paths"] = paths_config
+        
+        # Validar directorios
+        st.subheader("✅ Validación de Directorios")
+        for name, path in paths_config.items():
+            valid, message = ConfigValidator.validate_directory(path)
+            if valid:
+                st.success(f"📁 {name}: {message}")
+            else:
+                st.error(f"📁 {name}: {message}")
+        
+        config["video_generation"] = video_config
+        return config
+    
+    def render_backup_restore_section(config):
+        """Renderiza la sección de backup y restore"""
+        st.subheader("💾 Backup y Restauración")
+        
+        # Crear directorio de backups si no existe
+        backup_dir = Path("config_backups")
+        backup_dir.mkdir(exist_ok=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**📤 Crear Backup**")
+            
+            backup_name = st.text_input(
+                "Nombre del Backup (opcional)",
+                placeholder="backup_personalizado",
+                help="Si no especificas nombre, se usará la fecha y hora actual"
+            )
+            
+            if st.button("💾 Crear Backup", type="primary"):
+                try:
+                    # Crear nombre del backup
+                    if not backup_name:
+                        backup_name = f"config_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    
+                    backup_file = backup_dir / f"{backup_name}.json"
+                    
+                    # Guardar configuración
+                    with open(backup_file, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, indent=2, ensure_ascii=False, default=str)
+                    
+                    st.success(f"✅ Backup creado: {backup_file}")
+                except Exception as e:
+                    st.error(f"❌ Error creando backup: {e}")
+        
+        with col2:
+            st.write("**📥 Restaurar Backup**")
+            
+            # Listar backups disponibles
+            backup_files = list(backup_dir.glob("*.json"))
+            
+            if backup_files:
+                # Ordenar por fecha de modificación
+                backup_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                
+                backup_options = []
+                for backup_file in backup_files:
+                    modified_time = datetime.fromtimestamp(backup_file.stat().st_mtime)
+                    size_mb = backup_file.stat().st_size / 1024 / 1024
+                    backup_options.append(f"{backup_file.stem} ({modified_time.strftime('%Y-%m-%d %H:%M')} - {size_mb:.1f}MB)")
+                
+                selected_backup_idx = st.selectbox(
+                    "Seleccionar Backup",
+                    range(len(backup_options)),
+                    format_func=lambda x: backup_options[x],
+                    help="Selecciona un backup para restaurar"
+                )
+                
+                col2_1, col2_2 = st.columns(2)
+                
+                with col2_1:
+                    if st.button("📥 Restaurar", type="secondary"):
+                        try:
+                            selected_backup = backup_files[selected_backup_idx]
+                            with open(selected_backup, 'r', encoding='utf-8') as f:
+                                restored_config = json.load(f)
+                            
+                            # Guardar en session state para aplicar
+                            st.session_state["restored_config"] = restored_config
+                            st.success("✅ Backup restaurado. Guarda la configuración para aplicar cambios.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error restaurando backup: {e}")
+                
+                with col2_2:
+                    if st.button("🗑️ Eliminar", type="secondary"):
+                        try:
+                            selected_backup = backup_files[selected_backup_idx]
+                            selected_backup.unlink()
+                            st.success("✅ Backup eliminado")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error: {e}")
+            else:
+                st.info("No hay backups disponibles")
+        
+        # Mostrar lista de backups
+        if backup_files:
+            st.write("**📋 Backups Disponibles:**")
+            for backup_file in backup_files[:5]:  # Mostrar solo los 5 más recientes
+                modified_time = datetime.fromtimestamp(backup_file.stat().st_mtime)
+                size_mb = backup_file.stat().st_size / 1024 / 1024
+                st.write(f"• {backup_file.stem} - {modified_time.strftime('%Y-%m-%d %H:%M')} ({size_mb:.1f} MB)")
+        
+        # Aplicar configuración restaurada si existe
+        if "restored_config" in st.session_state:
+            config = st.session_state["restored_config"]
+            del st.session_state["restored_config"]
+        
+        return config
 
 
 
@@ -10,16 +757,118 @@ def show_settings_page():
     st.title("⚙️ Configuración Central del Proyecto")
     st.markdown("Aquí puedes gestionar todos los ajustes de la aplicación. Los cambios se guardan en `config.yaml`.")
 
+    # Cargar configuración con cache mejorado
+    if "config_cache_time" not in st.session_state:
+        st.session_state.config_cache_time = datetime.now()
+    
+    # Recargar config si han pasado más de 30 segundos o si se fuerza
+    if "force_config_reload" in st.session_state or \
+       (datetime.now() - st.session_state.config_cache_time).seconds > 30:
+        load_config.clear()  # Limpiar cache de Streamlit
+        st.session_state.config_cache_time = datetime.now()
+        if "force_config_reload" in st.session_state:
+            del st.session_state.force_config_reload
+
     config = load_config()
 
-    # Crear pestañas
-    tab_general, tab_ai, tab_tts, tab_transcription, tab_fish_audio_monitoring = st.tabs([
+    # Dashboard de estado al inicio
+    ConfigStatusDashboard.render_status_dashboard(config)
+    
+    st.divider()
+
+    # Crear pestañas expandidas
+    tab_dashboard, tab_general, tab_ai, tab_tts, tab_transcription, tab_video, tab_fish_audio_monitoring, tab_backup = st.tabs([
+        "📊 Dashboard",
         "⚙️ General", 
         "🤖 IA", 
         "🎤 Síntesis de Voz (TTS)",
         "🎙️ Transcripción",
-        "🐟 Monitoreo Fish Audio"
+        "🎥 Video",
+        "🐟 Monitoreo Fish Audio",
+        "💾 Backup/Restore"
     ])
+
+    # --- Pestaña Dashboard ---
+    with tab_dashboard:
+        st.header("📊 Panel de Control")
+        
+        # Configuración inteligente
+        st.subheader("🧠 Configuración Inteligente")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔧 Auto-detectar Configuración Óptima", type="primary"):
+                with st.spinner("Detectando configuración óptima..."):
+                    config = auto_detect_optimal_config(config)
+                    st.success("✅ Configuración optimizada automáticamente")
+                    st.session_state.force_config_reload = True
+                    st.rerun()
+        
+        with col2:
+            if st.button("🔄 Recargar Configuración", type="secondary"):
+                st.session_state.force_config_reload = True
+                st.rerun()
+        
+        # Métricas rápidas
+        st.subheader("📈 Métricas Rápidas")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            # Contar APIs configuradas
+            ai_config = config.get("ai", {})
+            apis_configured = sum([
+                1 for key in ["openai_api_key", "gemini_api_key", "replicate_api_key"] 
+                if ai_config.get(key, "").strip()
+            ])
+            st.metric("🔑 APIs", f"{apis_configured}/3")
+        
+        with col2:
+            # Verificar directorios
+            dirs = [config.get("output_dir"), config.get("projects_dir"), 
+                   config.get("temp_dir"), config.get("background_music_dir")]
+            dirs_valid = sum([1 for d in dirs if d and Path(d).exists()])
+            st.metric("📁 Directorios", f"{dirs_valid}/{len(dirs)}")
+        
+        with col3:
+            # Estado TTS
+            tts_providers = 0
+            if config.get("tts", {}).get("edge", {}).get("default_voice"):
+                tts_providers += 1
+            if config.get("tts", {}).get("fish_audio", {}).get("api_key", "").strip():
+                tts_providers += 1
+            st.metric("🎤 TTS", f"{tts_providers}/2")
+        
+        with col4:
+            # Configuración de video
+            video_config = config.get("video_generation", {})
+            video_complete = 1 if video_config else 0
+            st.metric("🎥 Video", f"{video_complete}/1")
+        
+        # Acciones rápidas
+        st.subheader("⚡ Acciones Rápidas")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🧪 Probar APIs", type="secondary"):
+                test_all_apis(config)
+        
+        with col2:
+            if st.button("📁 Crear Directorios", type="secondary"):
+                create_all_directories(config)
+        
+        with col3:
+            if st.button("💾 Backup Rápido", type="secondary"):
+                backup_manager = ConfigBackupManager()
+                backup_file = backup_manager.create_backup(config)
+                st.success(f"✅ Backup creado: {backup_file}")
+        
+        # Logs recientes
+        st.subheader("📋 Configuración Actual")
+        with st.expander("Ver configuración completa (JSON)"):
+            st.json(config)
 
     # --- Pestaña General ---
     with tab_general:
@@ -63,38 +912,102 @@ def show_settings_page():
         st.subheader("🔑 OpenAI")
         ai_config = config.get("ai", {})
         
-        ai_config["openai_api_key"] = st.text_input(
-            "OpenAI API Key",
-            value=ai_config.get("openai_api_key", ""),
-            type="password",
-            help="API key de OpenAI. Obtén una en https://platform.openai.com"
-        )
+        col_key, col_validate = st.columns([3, 1])
+        
+        with col_key:
+            ai_config["openai_api_key"] = st.text_input(
+                "OpenAI API Key",
+                value=ai_config.get("openai_api_key", ""),
+                type="password",
+                help="API key de OpenAI. Obtén una en https://platform.openai.com"
+            )
+        
+        with col_validate:
+            st.write("")  # Espaciado
+            if st.button("🔍", key="validate_openai", help="Validar API Key"):
+                if ai_config["openai_api_key"]:
+                    with st.spinner("Validando..."):
+                        valid, message = ConfigValidator.validate_api_key("openai", ai_config["openai_api_key"])
+                        if valid:
+                            st.success(message)
+                        else:
+                            st.error(message)
+                else:
+                    st.warning("Ingresa una API key primero")
         
         # Configuración de Gemini
         st.subheader("🔑 Google Gemini")
-        ai_config["gemini_api_key"] = st.text_input(
-            "Gemini API Key",
-            value=ai_config.get("gemini_api_key", ""),
-            type="password",
-            help="API key de Google Gemini. Obtén una en https://makersuite.google.com"
-        )
+        col_key, col_validate = st.columns([3, 1])
+        
+        with col_key:
+            ai_config["gemini_api_key"] = st.text_input(
+                "Gemini API Key",
+                value=ai_config.get("gemini_api_key", ""),
+                type="password",
+                help="API key de Google Gemini. Obtén una en https://makersuite.google.com"
+            )
+        
+        with col_validate:
+            st.write("")  # Espaciado
+            if st.button("🔍", key="validate_gemini", help="Validar API Key"):
+                if ai_config["gemini_api_key"]:
+                    with st.spinner("Validando..."):
+                        valid, message = ConfigValidator.validate_api_key("gemini", ai_config["gemini_api_key"])
+                        if valid:
+                            st.success(message)
+                        else:
+                            st.error(message)
+                else:
+                    st.warning("Ingresa una API key primero")
         
         # Configuración de Replicate
         st.subheader("🔑 Replicate")
-        ai_config["replicate_api_key"] = st.text_input(
-            "Replicate API Key",
-            value=ai_config.get("replicate_api_key", ""),
-            type="password",
-            help="API key de Replicate. Obtén una en https://replicate.com"
-        )
+        col_key, col_validate = st.columns([3, 1])
+        
+        with col_key:
+            ai_config["replicate_api_key"] = st.text_input(
+                "Replicate API Key",
+                value=ai_config.get("replicate_api_key", ""),
+                type="password",
+                help="API key de Replicate. Obtén una en https://replicate.com"
+            )
+        
+        with col_validate:
+            st.write("")  # Espaciado
+            if st.button("🔍", key="validate_replicate", help="Validar API Key"):
+                if ai_config["replicate_api_key"]:
+                    with st.spinner("Validando..."):
+                        valid, message = ConfigValidator.validate_api_key("replicate", ai_config["replicate_api_key"])
+                        if valid:
+                            st.success(message)
+                        else:
+                            st.error(message)
+                else:
+                    st.warning("Ingresa una API key primero")
         
         # Configuración de Ollama
         st.subheader("🔑 Ollama")
-        ai_config["ollama_base_url"] = st.text_input(
-            "Ollama Base URL",
-            value=ai_config.get("ollama_base_url", "http://localhost:11434"),
-            help="URL base de Ollama (por defecto: http://localhost:11434)"
-        )
+        col_key, col_validate = st.columns([3, 1])
+        
+        with col_key:
+            ai_config["ollama_base_url"] = st.text_input(
+                "Ollama Base URL",
+                value=ai_config.get("ollama_base_url", "http://localhost:11434"),
+                help="URL base de Ollama (por defecto: http://localhost:11434)"
+            )
+        
+        with col_validate:
+            st.write("")  # Espaciado
+            if st.button("🔍", key="validate_ollama", help="Probar Conexión"):
+                if ai_config["ollama_base_url"]:
+                    with st.spinner("Probando conexión..."):
+                        valid, message = ConfigValidator.validate_ollama_connection(ai_config["ollama_base_url"])
+                        if valid:
+                            st.success(message)
+                        else:
+                            st.error(message)
+                else:
+                    st.warning("Ingresa una URL primero")
         
         # Modelos por defecto
         st.subheader("🤖 Modelos por Defecto")
@@ -481,6 +1394,10 @@ def show_settings_page():
         transcription_config["replicate"] = replicate_config
         config["transcription"] = transcription_config
 
+    # --- Pestaña de Video ---
+    with tab_video:
+        config = render_video_configuration_tab(config)
+
     # --- Pestaña de Monitoreo Fish Audio ---
     with tab_fish_audio_monitoring:
         st.header("🐟 Monitoreo de Créditos Fish Audio")
@@ -651,12 +1568,199 @@ def show_settings_page():
             st.error(f"❌ Error cargando datos de monitoreo: {e}")
             st.exception(e)
 
-    # --- Botón de Guardado --- 
+    # --- Pestaña de Backup/Restore ---
+    with tab_backup:
+        config = render_backup_restore_section(config)
+
+    # --- Botón de Guardado Mejorado --- 
     st.divider()
-    if st.button("💾 Guardar Toda la Configuración", type="primary", use_container_width=True):
-        if save_config(config):
-            # Opcional: forzar un rerun para que toda la app recargue la nueva config
-            st.rerun()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("💾 Guardar Configuración", type="primary", use_container_width=True):
+            with st.spinner("Guardando configuración..."):
+                # Crear backup automático antes de guardar
+                backup_manager = ConfigBackupManager()
+                backup_file = backup_manager.create_backup(config, "auto_backup_before_save")
+                
+                if save_config(config):
+                    st.success(f"✅ Configuración guardada. Backup automático: {backup_file}")
+                    st.session_state.force_config_reload = True
+                    st.rerun()
+                else:
+                    st.error("❌ Error guardando configuración")
+    
+    with col2:
+        if st.button("🔐 Guardar con API Keys", type="secondary", use_container_width=True):
+            with st.spinner("Guardando configuración y API keys..."):
+                backup_manager = ConfigBackupManager()
+                backup_file = backup_manager.create_backup(config, "auto_backup_with_keys")
+                
+                if save_config_with_api_keys(config):
+                    st.success(f"✅ Configuración y API keys guardadas. Backup: {backup_file}")
+                    st.session_state.force_config_reload = True
+                    st.rerun()
+                else:
+                    st.error("❌ Error guardando configuración")
+    
+    with col3:
+        if st.button("🧪 Validar Todo", type="secondary", use_container_width=True):
+            validate_entire_configuration(config)
+
+# --- Funciones Auxiliares ---
+
+def auto_detect_optimal_config(config: Dict[Any, Any]) -> Dict[Any, Any]:
+    """Detecta automáticamente la configuración óptima"""
+    
+    # Detectar capacidades del sistema
+    import psutil
+    import platform
+    
+    # Configuración de transcripción basada en recursos
+    memory_gb = psutil.virtual_memory().total / (1024**3)
+    cpu_count = psutil.cpu_count()
+    
+    if "transcription" not in config:
+        config["transcription"] = {}
+    
+    if "local" not in config["transcription"]:
+        config["transcription"]["local"] = {}
+    
+    # Seleccionar modelo de Whisper basado en memoria
+    if memory_gb >= 16:
+        config["transcription"]["local"]["model_size"] = "large-v3"
+        config["transcription"]["local"]["compute_type"] = "float16"
+    elif memory_gb >= 8:
+        config["transcription"]["local"]["model_size"] = "medium"
+        config["transcription"]["local"]["compute_type"] = "int8_float16"
+    else:
+        config["transcription"]["local"]["model_size"] = "small"
+        config["transcription"]["local"]["compute_type"] = "int8"
+    
+    # Detectar GPU NVIDIA
+    try:
+        import GPUtil
+        gpus = GPUtil.getGPUs()
+        if gpus:
+            config["transcription"]["local"]["device"] = "cuda"
+            st.info("🎯 GPU NVIDIA detectada - Configurando para usar CUDA")
+        else:
+            config["transcription"]["local"]["device"] = "cpu"
+    except ImportError:
+        config["transcription"]["local"]["device"] = "cpu"
+    
+    # Configuración de video basada en resolución común
+    if "video_generation" not in config:
+        config["video_generation"] = {}
+    
+    if "quality" not in config["video_generation"]:
+        config["video_generation"]["quality"] = {}
+    
+    # Configuración conservadora para compatibilidad
+    config["video_generation"]["quality"]["resolution"] = "1920x1080"
+    config["video_generation"]["quality"]["fps"] = 24
+    config["video_generation"]["quality"]["bitrate"] = "5000k"
+    
+    st.success(f"🎯 Configuración optimizada para: {memory_gb:.1f}GB RAM, {cpu_count} CPUs")
+    
+    return config
+
+def test_all_apis(config: Dict[Any, Any]):
+    """Prueba todas las APIs configuradas"""
+    st.subheader("🧪 Probando APIs...")
+    
+    ai_config = config.get("ai", {})
+    tts_config = config.get("tts", {})
+    
+    apis_to_test = [
+        ("OpenAI", "openai", ai_config.get("openai_api_key", "")),
+        ("Gemini", "gemini", ai_config.get("gemini_api_key", "")),
+        ("Replicate", "replicate", ai_config.get("replicate_api_key", "")),
+        ("Fish Audio", "fish_audio", tts_config.get("fish_audio", {}).get("api_key", ""))
+    ]
+    
+    results = []
+    
+    for name, service, api_key in apis_to_test:
+        if api_key and api_key.strip():
+            with st.spinner(f"Probando {name}..."):
+                valid, message = ConfigValidator.validate_api_key(service, api_key)
+                results.append((name, valid, message))
+        else:
+            results.append((name, False, "❌ API key no configurada"))
+    
+    # Mostrar resultados
+    for name, valid, message in results:
+        if valid:
+            st.success(f"✅ {name}: {message}")
+        else:
+            st.error(f"❌ {name}: {message}")
+
+def create_all_directories(config: Dict[Any, Any]):
+    """Crea todos los directorios necesarios"""
+    st.subheader("📁 Creando directorios...")
+    
+    directories = [
+        ("Output", config.get("output_dir", "output")),
+        ("Projects", config.get("projects_dir", "projects")),
+        ("Temp", config.get("temp_dir", "temp")),
+        ("Background Music", config.get("background_music_dir", "background_music"))
+    ]
+    
+    # Agregar directorios de video si existen
+    video_paths = config.get("video_generation", {}).get("paths", {})
+    for key, path in video_paths.items():
+        if path:
+            directories.append((key.title(), path))
+    
+    success_count = 0
+    
+    for name, path in directories:
+        if path:
+            valid, message = ConfigValidator.validate_directory(path)
+            if valid:
+                st.success(f"✅ {name}: {message}")
+                success_count += 1
+            else:
+                st.error(f"❌ {name}: {message}")
+        else:
+            st.warning(f"⚠️ {name}: Ruta no configurada")
+    
+    st.info(f"📊 {success_count}/{len(directories)} directorios creados/verificados")
+
+def validate_entire_configuration(config: Dict[Any, Any]):
+    """Valida toda la configuración"""
+    st.subheader("🔍 Validando configuración completa...")
+    
+    validation_results = {
+        "apis": 0,
+        "directories": 0,
+        "services": 0,
+        "total_checks": 0
+    }
+    
+    # Validar APIs
+    st.write("**🔑 Validando APIs...**")
+    test_all_apis(config)
+    
+    # Validar directorios
+    st.write("**📁 Validando directorios...**")
+    create_all_directories(config)
+    
+    # Validar servicios
+    st.write("**🛠️ Validando servicios...**")
+    
+    # Ollama
+    ollama_url = config.get("ai", {}).get("ollama_base_url", "")
+    if ollama_url:
+        valid, message = ConfigValidator.validate_ollama_connection(ollama_url)
+        if valid:
+            st.success(f"✅ Ollama: {message}")
+        else:
+            st.error(f"❌ Ollama: {message}")
+    
+    st.success("🎉 Validación completa finalizada")
 
 # Para poder llamar a esta página desde app.py
 if __name__ == "__main__":

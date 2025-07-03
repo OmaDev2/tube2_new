@@ -84,6 +84,13 @@ class VideoServices:
         # final_audio = None # Ya no se maneja aquí
 
         if not images: raise ValueError("Lista de imágenes vacía.")
+
+        # Validación estricta de duraciones
+        if any(d <= 0 for d in scene_durations):
+            invalid_durations = [(i, d) for i, d in enumerate(scene_durations) if d <= 0]
+            logger.error(f"Duraciones inválidas detectadas: {invalid_durations}")
+            raise ValueError(f"Se encontraron {len(invalid_durations)} duraciones <= 0: {invalid_durations}")
+
         if len(images) != len(scene_durations):
             # Permitir continuar si no hay duraciones pero sí imágenes (se usará un default en el llamador)
             # O si hay más duraciones que imágenes (se usarán las primeras N duraciones)

@@ -1,0 +1,113 @@
+{
+  "ai": {
+    "openai_api_key": "",
+    "gemini_api_key": "",
+    "replicate_api_key": "",
+    "ollama_base_url": "http://localhost:11434",
+    "default_models": {
+      "openai": "gpt-4o-mini",
+      "gemini": "models/gemini-2.5-flash-lite-preview-06-17",
+      "ollama": "llama3",
+      "image_generation": "black-forest-labs/flux-schnell",
+      "image_prompt_generation": "models/gemini-2.5-flash-lite-preview-06-17",
+      "default_voice": "es-ES-AlvaroNeural"
+    }
+  },
+  "tts": {
+    "default_provider": "fish",
+    "edge": {
+      "default_voice": "es-ES-AlvaroNeural",
+      "default_rate": "+0%",
+      "default_pitch": "+0Hz"
+    },
+    "fish_audio": {
+      "api_key": "",
+      "default_model": "speech-1.6",
+      "default_format": "mp3",
+      "default_mp3_bitrate": 128,
+      "default_normalize": true,
+      "default_latency": "normal",
+      "reference_id": "8d2c17a9b26d4d83888ea67a1ee565b2"
+    }
+  },
+  "video_generation": {
+    "quality": {
+      "resolution": "1920x1080",
+      "fps": 24,
+      "bitrate": "5000k",
+      "audio_bitrate": "192k",
+      "output_format": "mp4"
+    },
+    "paths": {
+      "projects_dir": "projects",
+      "assets_dir": "overlays",
+      "output_dir": "output/",
+      "background_music_dir": "background_music",
+      "assets": "overlays/",
+      "audio_source": "data/"
+    },
+    "subtitles": {
+      "enable": true,
+      "font": "Impact",
+      "font_size": 50,
+      "font_color": "#FFFFFF",
+      "stroke_color": "#000000",
+      "stroke_width": 2.0,
+      "position": "bottom",
+      "max_words": 7,
+      "outline_color": "#000000"
+    },
+    "transitions": {
+      "default_type": "dissolve",
+      "default_duration": 1.0
+    },
+    "audio": {
+      "default_music_volume": 0.06,
+      "normalize_audio": true,
+      "default_voice_volume": 1.0,
+      "background_music": "background_music/Magnetic Lullaby - Amulets.mp3",
+      "normalize_volume": true,
+      "match_video_duration": true
+    },
+    "effects": {
+      "overlays": [
+        {
+          "name": "overlays/sparkes_vonv_lossy.webm",
+          "opacity": 0.25,
+          "position": "center",
+          "loop": true
+        }
+      ]
+    },
+    "batch_processing": {
+      "max_parallel_videos": 3,
+      "auto_cleanup": true
+    },
+    "historical_analysis": {
+      "default_provider": "gemini",
+      "default_model": "models/gemini-2.5-flash-lite-preview-06-17"
+    }
+  },
+  "transcription": {
+    "service_type": "replicate",
+    "local": {
+      "model_size": "medium",
+      "device": "cpu",
+      "compute_type": "int8",
+      "default_language": "es",
+      "beam_size": 5
+    },
+    "replicate": {
+      "default_language": "es",
+      "task": "transcribe",
+      "timestamp": "chunk",
+      "batch_size": 24,
+      "diarise_audio": false,
+      "hf_token": null
+    }
+  },
+  "output_dir": "output",
+  "projects_dir": "projects",
+  "temp_dir": "temp",
+  "background_music_dir": "background_music"
+}

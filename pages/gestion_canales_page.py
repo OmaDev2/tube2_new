@@ -14,6 +14,20 @@ from utils.database_manager import DatabaseManager
 
 # --- Configuración de la Página de Streamlit ---
 def render_gestion_canales():
+    # Importar la versión mejorada
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).parent.parent))
+        from tmp_rovodev_enhanced_channels import render_enhanced_gestion_canales
+        
+        # Usar la versión mejorada
+        render_enhanced_gestion_canales()
+        return
+    except ImportError:
+        pass
+    
+    # Fallback a la versión original
     st.title("📺 Gestión de Canales de YouTube")
     st.markdown("""
     Aquí puedes añadir y ver los canales de YouTube para los que quieres planificar y generar contenido.
