@@ -23,17 +23,17 @@ logger = logging.getLogger(__name__)
 
 # --- NUEVA CONSTANTE ---
 # Si una escena dura más que esto (en segundos), se subdividirá para mantener el dinamismo.
-MAX_SCENE_DURATION = 12.0
+
 
 class SceneGenerator:
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, max_scene_duration: float = 12.0, use_auto_duration: bool = True, duration_per_image_manual: float = 10.0):
         self.config = config or self._load_void_config()
         self.video_gen_config = self.config.get('video_generation', {})
-        # AIServices ahora se pasará como argumento donde se necesite
-        # para evitar inicializarlo si no se usa.
-        # self.ai_service = AIServices() 
+        self.max_scene_duration = max_scene_duration
+        self.use_auto_duration = use_auto_duration
+        self.duration_per_image_manual = duration_per_image_manual
         self.duration_per_image = self.video_gen_config.get('timing', {}).get('default_duration_per_image', 10.0)
-        logger.info(f"SceneGenerator inicializado con duración/imagen base: {self.duration_per_image:.2f}s")
+        logger.info(f"SceneGenerator inicializado con duración/imagen base: {self.duration_per_image:.2f}s, max_scene_duration: {self.max_scene_duration}s, use_auto_duration: {self.use_auto_duration}, duration_per_image_manual: {self.duration_per_image_manual}")
 
     def _load_void_config(self) -> Dict:
         try:
@@ -193,13 +193,14 @@ class SceneGenerator:
         transcription_segments = self._fix_encoding_in_segments(transcription_segments)
         
         # PARÁMETROS OPTIMIZADOS PARA CONTEXTO Y DINAMISMO
-        MAX_NARRATIVE_UNIT = 15.0   # Máximo para unidad narrativa (reducido)
-        TARGET_IMAGE_DURATION = 8.0  # Duración ideal por imagen (más dinámico)
-        MAX_IMAGE_DURATION = 12.0    # Máximo absoluto por imagen (límite estricto)
-        MIN_NARRATIVE_DURATION = 6.0  # AUMENTADO: Mínimo para mantener contexto
-        TRANSITION_DURATION = 1.0     # Duración de transiciones
+        # Derivados de max_scene_duration para flexibilidad
+        MAX_IMAGE_DURATION = self.max_scene_duration  # El límite estricto es el que viene de la UI
+        TARGET_IMAGE_DURATION = MAX_IMAGE_DURATION * 0.8  # Objetivo es un 80% del máximo
+        MAX_NARRATIVE_UNIT = MAX_IMAGE_DURATION * 1.25 # Una unidad narrativa puede ser un poco más larga que una imagen
+        MIN_NARRATIVE_DURATION = MAX_IMAGE_DURATION * 0.5 # Mínimo para mantener contexto (50% del máximo)
+        TRANSITION_DURATION = 1.0     # Duración de transiciones (se mantiene fija por ahora)
         
-        logger.info(f"🎬 Creando escenas dinámicas V2:")
+        logger.info(f"🎬 Creando escenas dinámicas V2 (basado en UI max_scene_duration: {self.max_scene_duration}s):")
         logger.info(f"  • Unidad narrativa máxima: {MAX_NARRATIVE_UNIT}s")
         logger.info(f"  • Duración objetivo por imagen: {TARGET_IMAGE_DURATION}s")
         logger.info(f"  • Duración máxima por imagen: {MAX_IMAGE_DURATION}s")
@@ -741,25 +742,27 @@ class SceneGenerator:
         
         return text
 
-    def _align_paragraphs_to_transcription(self, paragraphs: List[str], transcription_segments: List[Dict]) -> List[Dict]:
+    def _align_paragraphs_to_transcription(self, paragraphs: List[str], transcription_segments: List[Dict], max_scene_duration: float = 12.0) -> List[Dict]:
         """
         NUEVO: Usa segmentación semántica en lugar de alineación compleja con fuzzywuzzy.
         Esto es más confiable y siempre produce escenas sincronizadas.
         """
         logger.info("Usando segmentación semántica inteligente (sin fuzzywuzzy)")
         
-        # Calcular duración objetivo basada en el número de párrafos
         if not transcription_segments:
             return []
         
-        total_duration = transcription_segments[-1]['end'] - transcription_segments[0]['start']
-        num_paragraphs = len([p for p in paragraphs if p.strip()])
-        target_duration = total_duration / max(num_paragraphs, 1) if num_paragraphs > 0 else 12.0
-        
-        # Ajustar duración objetivo para que sea razonable (8-15 segundos)
-        target_duration = max(8.0, min(target_duration, 15.0))
-        
-        logger.info(f"Duración objetivo por escena: {target_duration:.1f}s (total: {total_duration:.1f}s, párrafos: {num_paragraphs})")
+        if self.use_auto_duration:
+            total_duration = transcription_segments[-1]['end'] - transcription_segments[0]['start']
+            num_paragraphs = len([p for p in paragraphs if p.strip()])
+            target_duration = total_duration / max(num_paragraphs, 1) if num_paragraphs > 0 else self.max_scene_duration
+            
+            # Ajustar duración objetivo para que sea razonable (8-15 segundos) si es automática
+            target_duration = max(8.0, min(target_duration, 15.0))
+            logger.info(f"Duración objetivo calculada automáticamente: {target_duration:.1f}s (total: {total_duration:.1f}s, párrafos: {num_paragraphs})")
+        else:
+            target_duration = self.duration_per_image_manual
+            logger.info(f"Duración objetivo manual: {target_duration:.1f}s")
         
         # Crear escenas semánticas
         return self._create_semantic_scenes(transcription_segments, target_duration)
@@ -771,12 +774,12 @@ class SceneGenerator:
         if mode == "Por Párrafos (Híbrido)":
             # --- LÓGICA POR PÁRRAFOS (HÍBRIDA) ---
             paragraphs = self._segment_script_by_paragraphs(script_content)
-            timed_scenes = self._align_paragraphs_to_transcription(paragraphs, transcription_segments)
+            timed_scenes = self._align_paragraphs_to_transcription(paragraphs, transcription_segments, max_scene_duration=self.max_scene_duration)
             
             final_scenes_base = []
             for scene in timed_scenes:
-                if scene['duration'] > MAX_SCENE_DURATION:
-                    logger.info(f"Scene {scene['index']} is too long ({scene['duration']:.1f}s > {MAX_SCENE_DURATION}s). Subdividing robustly.")
+                if scene['duration'] > self.max_scene_duration:
+                    logger.info(f"Scene {scene['index']} is too long ({scene['duration']:.1f}s > {self.max_scene_duration}s). Subdividing robustly.")
                     
                     # Robust subdivision logic
                     scene_segments = [
@@ -791,7 +794,7 @@ class SceneGenerator:
                         final_scenes_base.append(scene_copy)
                         continue
 
-                    target_sub_duration = MAX_SCENE_DURATION * 0.9
+                    target_sub_duration = self.max_scene_duration * 0.9
                     num_sub_scenes = max(2, round(scene['duration'] / target_sub_duration))
                     
                     k, m = divmod(len(scene_segments), num_sub_scenes)
@@ -1129,10 +1132,40 @@ class SceneGenerator:
             
             if not generated_prompt:
                 logger.error(f"[Escena {i+1}] 🚨 Todos los proveedores fallaron. Usando prompt de emergencia. Texto de escena: {scene['text'][:100]}...")
-                scene['image_prompt'] = f"Photorealistic, cinematic, high detail: {scene['text'][:350]}"
-            else:
-                scene['image_prompt'] = generated_prompt
+                generated_prompt = f"Photorealistic, cinematic, high detail: {scene['text'][:350]}"
+            
+            # Asegurar que el estilo se pre-añade al prompt final
+            final_style = image_prompt_config.get('style', '').strip()
+            if not final_style:
+                final_style = "realistic, high detail" # Estilo por defecto si no se especifica
+            
+            scene['image_prompt'] = f"{final_style}, {generated_prompt}"
+            
+            # Limpiar posibles comas dobles o espacios extra
+            scene['image_prompt'] = scene['image_prompt'].replace(", ,", ",").replace("  ", " ").strip()
+            if scene['image_prompt'].endswith(','):
+                scene['image_prompt'] = scene['image_prompt'][:-1].strip()
             logger.info(f"[Escena {i+1}] Prompt final asignado: {scene['image_prompt'][:100]}...")
+
+            # --- DEBUG: Guardar prompt en archivo ---
+            project_id = project_info.get('id', 'unknown_project')
+            project_dir = Path("projects") / project_id
+            debug_file_path = project_dir / "debug_prompts.txt"
+            
+            try:
+                project_dir.mkdir(parents=True, exist_ok=True)
+                with open(debug_file_path, 'a', encoding='utf-8') as f:
+                    f.write(f"--- Escena {i+1} ---\n")
+                    f.write(f"### System Prompt (LLM) ###\n")
+                    f.write(f"""""{system_prompt}"""""\n\n")
+                    f.write(f"### User Prompt (LLM) ###\n")
+                    f.write(f"""""{user_prompt}"""""\n\n")
+                    f.write(f"### Final Image Prompt ###\n")
+                    f.write(f"{scene['image_prompt']}\n\n")
+                logger.info(f"[Escena {i+1}] Prompts de depuración guardados en {debug_file_path}")
+            except Exception as e:
+                logger.error(f"[Escena {i+1}] Error al guardar prompts de depuración en debug_prompts.txt: {e}")
+            # --- FIN DEBUG ---
         
         return scenes
 

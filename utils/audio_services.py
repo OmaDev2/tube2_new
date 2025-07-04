@@ -6,6 +6,7 @@ import tempfile
 import logging
 from typing import Optional, Dict, List, Any
 import json
+from utils.config import load_config
 
 # Fish Audio imports
 try:
@@ -377,10 +378,10 @@ def generate_fish_audio_audio(
     mp3_bitrate: int = 128,
     normalize: bool = True,
     latency: str = "normal",
-    output_dir: str = "audio",
-    # NUEVO: Límite de caracteres para la división del texto
-    chunk_size: int = 4000
+    output_dir: str = "audio"
 ) -> str:
+    config = load_config()
+    chunk_size = config.get('tts', {}).get('fish_audio', {}).get('chunk_size', 2500)
     """
     Genera un archivo de audio a partir de texto usando Fish Audio TTS.
     MEJORADO: Ahora divide el texto en chunks para manejar guiones largos de forma robusta.

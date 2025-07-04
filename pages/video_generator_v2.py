@@ -151,6 +151,7 @@ Teresa reformó la orden carmelita, fundando numerosos conventos y escribiendo o
         
         with col3:
             st.subheader("⚙️ Procesamiento")
+            max_scene_duration = st.slider("Duración Máxima por Escena (seg)", 3, 20, 12)
             scene_duration = st.slider("Duración por Escena (seg)", 3, 15, 8)
             transition_duration = st.slider("Duración Transiciones (seg)", 0.5, 3.0, 1.0)
             quality_mode = st.selectbox("Modo de Calidad", ["Rápido", "Equilibrado", "Máxima Calidad"])
@@ -176,6 +177,7 @@ Teresa reformó la orden carmelita, fundando numerosos conventos y escribiendo o
                     'image_service': image_service,
                     'visual_consistency': visual_consistency,
                     'dynamic_effects': dynamic_effects,
+                    'max_scene_duration': max_scene_duration,
                     'scene_duration': scene_duration,
                     'transition_duration': transition_duration,
                     'quality_mode': quality_mode
@@ -356,6 +358,7 @@ def create_scenes_v2(audio: Dict[str, Any], analysis: Dict[str, Any], config: Di
     
     scenes = []
     current_time = 0.0
+    max_scene_duration = config.get('max_scene_duration', 12.0)
     
     for i, segment in enumerate(audio['segments']):
         scene_duration = segment['duration']

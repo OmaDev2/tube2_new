@@ -587,6 +587,16 @@ def show_batch_processor():
         st.markdown("---")
         st.subheader("⏱️ Duración de Escenas")
         
+        max_scene_duration = st.slider(
+            "Duración Máxima por Escena (s)",
+            min_value=5.0,
+            max_value=25.0,
+            value=12.0,
+            step=0.5,
+            key="batch_max_scene_duration",
+            help="Define el tiempo máximo para una escena antes de que se subdivida automáticamente. Afecta principalmente a la segmentación 'Híbrida'."
+        )
+
         # Mostrar información contextual según el método de segmentación
         if segmentation_mode == "Por Duración (Basado en Audio)":
             st.info("💡 Con segmentación por duración, se recomienda usar duración automática para consistencia.")
@@ -876,7 +886,8 @@ def show_batch_processor():
                 "prompt_obj": img_prompt_obj
             },
             "scenes_config": {
-                "segmentation_mode": segmentation_mode
+                "segmentation_mode": segmentation_mode,
+                "max_scene_duration": max_scene_duration
             },
             "video": video_config,
             "audio": audio_config,
@@ -1211,7 +1222,7 @@ def _render_batch_audio_config(app_config):
     
     # Seleccionar proveedor TTS
     provider_options = ["Edge TTS", "Fish Audio"]
-    provider_mapping = {"edge": "Edge TTS", "fish_audio": "Fish Audio"}
+    provider_mapping = {"edge": "Edge TTS", "fish": "Fish Audio"}
     default_provider_ui = provider_mapping.get(default_provider, "Edge TTS")
     provider_index = provider_options.index(default_provider_ui) if default_provider_ui in provider_options else 0
     

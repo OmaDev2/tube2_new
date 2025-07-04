@@ -24,6 +24,7 @@ tts:
     default_normalize: true
     default_latency: normal
     reference_id: 8d2c17a9b26d4d83888ea67a1ee565b2
+    chunk_size: 10000 # Nuevo: Tamaño de chunk para Fish Audio (caracteres)
 video_generation:
   quality:
     resolution: 1920x1080

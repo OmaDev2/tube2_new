@@ -1,6 +1,6 @@
 {
-  "total_bytes_processed": 143242,
-  "total_cost_usd": 2.1486300000000003,
+  "total_bytes_processed": 205192,
+  "total_cost_usd": 3.0778799999999995,
   "daily_usage": {
     "2025-06-29": {
       "bytes_processed": 35527,
@@ -25,6 +25,14 @@
       "models_used": {
         "speech-1.6": 5
       }
+    },
+    "2025-07-04": {
+      "bytes_processed": 61950,
+      "cost_usd": 0.9292500000000002,
+      "requests": 17,
+      "models_used": {
+        "speech-1.6": 17
+      }
     }
   },
   "monthly_usage": {
@@ -34,9 +42,9 @@
       "requests": 7
     },
     "2025-07": {
-      "bytes_processed": 71768,
-      "cost_usd": 1.07652,
-      "requests": 5
+      "bytes_processed": 133718,
+      "cost_usd": 2.0057699999999996,
+      "requests": 22
     }
   },
   "usage_history": [
@@ -135,6 +143,142 @@
       "cost_usd": 0.43434,
       "model": "speech-1.6",
       "date": "2025-07-03"
+    },
+    {
+      "timestamp": "2025-07-04T10:18:37.918426",
+      "text_length": 4000,
+      "bytes_processed": 4084,
+      "cost_usd": 0.06126,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:20:39.568939",
+      "text_length": 4000,
+      "bytes_processed": 4095,
+      "cost_usd": 0.061424999999999993,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:22:57.096719",
+      "text_length": 4000,
+      "bytes_processed": 4083,
+      "cost_usd": 0.061244999999999994,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:24:57.268105",
+      "text_length": 4000,
+      "bytes_processed": 4083,
+      "cost_usd": 0.061244999999999994,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:26:36.483671",
+      "text_length": 4000,
+      "bytes_processed": 4094,
+      "cost_usd": 0.061410000000000006,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:28:35.024201",
+      "text_length": 4000,
+      "bytes_processed": 4078,
+      "cost_usd": 0.06117,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:30:28.167153",
+      "text_length": 4000,
+      "bytes_processed": 4083,
+      "cost_usd": 0.061244999999999994,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:32:14.215042",
+      "text_length": 4000,
+      "bytes_processed": 4100,
+      "cost_usd": 0.061500000000000006,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:34:12.041833",
+      "text_length": 4000,
+      "bytes_processed": 4098,
+      "cost_usd": 0.061470000000000004,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T10:36:16.501093",
+      "text_length": 2199,
+      "bytes_processed": 2244,
+      "cost_usd": 0.033659999999999995,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T17:50:01.684969",
+      "text_length": 2500,
+      "bytes_processed": 2551,
+      "cost_usd": 0.038265,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T17:50:58.503851",
+      "text_length": 1241,
+      "bytes_processed": 1267,
+      "cost_usd": 0.019004999999999998,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T18:45:18.060743",
+      "text_length": 3741,
+      "bytes_processed": 3818,
+      "cost_usd": 0.05727,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T18:52:30.992618",
+      "text_length": 3741,
+      "bytes_processed": 3818,
+      "cost_usd": 0.05727,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T19:08:39.887834",
+      "text_length": 3741,
+      "bytes_processed": 3818,
+      "cost_usd": 0.05727,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T19:10:37.968318",
+      "text_length": 3741,
+      "bytes_processed": 3818,
+      "cost_usd": 0.05727,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
+    },
+    {
+      "timestamp": "2025-07-04T19:18:49.534634",
+      "text_length": 3741,
+      "bytes_processed": 3818,
+      "cost_usd": 0.05727,
+      "model": "speech-1.6",
+      "date": "2025-07-04"
     }
   ],
   "budget_limit": 50.0,

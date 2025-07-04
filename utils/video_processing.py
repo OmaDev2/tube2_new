@@ -350,6 +350,13 @@ class VideoProcessor:
             scenes_ui_config = full_config.get("scenes_config", {}) 
             segmentation_mode = scenes_ui_config.get("segmentation_mode", "Automático (Texto)") 
             
+            # Actualizar los atributos de scene_generator con la configuración de la UI
+            self.scene_generator.max_scene_duration = scenes_ui_config.get("max_scene_duration", 12.0)
+            self.scene_generator.use_auto_duration = full_config.get("video", {}).get("use_auto_duration", True)
+            self.scene_generator.duration_per_image_manual = full_config.get("video", {}).get("duration_per_image_manual", 10.0)
+            
+            logger.info(f"[{project_id}] SceneGenerator actualizado con: max_scene_duration={self.scene_generator.max_scene_duration}, use_auto_duration={self.scene_generator.use_auto_duration}, duration_per_image_manual={self.scene_generator.duration_per_image_manual}")
+
             image_config_ui = full_config.get("image", {})
             # Pasar el objeto prompt completo a scene_generator, ya que este sabe cómo extraer system y user.
             img_prompt_config = {

@@ -89,10 +89,12 @@ DEFAULT_CONFIG = {
         "replicate": {
             "default_language": "es",
             "task": "transcribe",
-            "timestamp": "chunk",
+            "timestamp": "word",
             "batch_size": 24,
             "diarise_audio": False,
-            "hf_token": None
+            "hf_token": None,
+            "temperature": 0.0,
+            "vad_threshold": 0.5
         }
     },
     "output_dir": "output",
