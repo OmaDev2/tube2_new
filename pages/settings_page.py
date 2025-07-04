@@ -1051,7 +1051,7 @@ def show_settings_page():
         # Inicializar configuración TTS si no existe
         if "tts" not in config:
             config["tts"] = {
-                "default_provider": "edge",
+                "default_provider": "fish",
                 "edge": {
                     "default_voice": "es-ES-AlvaroNeural",
                     "default_rate": "+0%",

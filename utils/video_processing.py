@@ -92,7 +92,7 @@ class VideoProcessor:
         except Exception as e:
             logger.warning(f"Error cargando configuración TTS: {e}")
             return {
-                'default_provider': 'edge',
+                'default_provider': 'fish',
                 'edge': {
                     'default_voice': 'es-ES-AlvaroNeural',
                     'default_rate': '+0%',
@@ -143,8 +143,8 @@ class VideoProcessor:
         logger.info(f"AIServices inicializado - Cliente Replicate: {self.ai_service.replicate_client is not None}")
         logger.info(f"AIServices token: {self.ai_service.replicate_token[:10] if self.ai_service.replicate_token else 'None'}...")
         self.audio_service = AudioServices() 
-        self.scene_generator = None 
-        logger.info(f"SceneGenerator inicializado (placeholder): {type(self.scene_generator)}") 
+        self.scene_generator = SceneGenerator(config=self.void_config)
+        logger.info(f"SceneGenerator inicializado: {self.scene_generator is not None}") 
         self.video_service = VideoServices() 
         
         # Inicializar servicio de transcripción según configuración
@@ -263,7 +263,7 @@ class VideoProcessor:
             tts_settings = {k: v for k, v in audio_config_ui.items() if k.startswith('tts_')}
             
             # Obtener configuración de TTS
-            tts_provider = tts_settings.get('tts_provider', 'edge')
+            tts_provider = tts_settings.get('tts_provider', 'fish')
             from utils.audio_services import generate_tts_audio
             
             if tts_provider == 'edge':

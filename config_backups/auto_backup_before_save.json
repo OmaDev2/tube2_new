@@ -1,8 +1,8 @@
 {
   "ai": {
-    "openai_api_key": "",
-    "gemini_api_key": "",
-    "replicate_api_key": "",
+    "openai_api_key": "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' GEMINI_API_KEY='AIzaSyD_vlawUK4jvt8ZQq38BZdJh-mZCkMcPJ0",
+    "gemini_api_key": "AIzaSyD_vlawUK4jvt8ZQq38BZdJh-mZCkMcPJ0",
+    "replicate_api_key": "***REMOVED***",
     "ollama_base_url": "http://localhost:11434",
     "default_models": {
       "openai": "gpt-4o-mini",
@@ -21,7 +21,7 @@
       "default_pitch": "+0Hz"
     },
     "fish_audio": {
-      "api_key": "",
+      "api_key": "5b076c49251f4874bdb6171f80fc47f2",
       "default_model": "speech-1.6",
       "default_format": "mp3",
       "default_mp3_bitrate": 128,

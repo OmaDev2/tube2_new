@@ -29,7 +29,7 @@ DEFAULT_CONFIG = {
         }
     },
     "tts": {
-        "default_provider": "edge",
+        "default_provider": "fish",
         "edge": {
             "default_voice": "es-ES-AlvaroNeural",
             "default_rate": "+0%",

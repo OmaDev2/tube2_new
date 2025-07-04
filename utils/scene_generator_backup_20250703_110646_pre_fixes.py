@@ -178,25 +178,20 @@ class SceneGenerator:
         """
         Crea escenas semánticamente coherentes con subdivisión inteligente.
         
-        LÓGICA MEJORADA V2.1 - CORRECCIONES APLICADAS:
+        LÓGICA MEJORADA V2:
         1. Detecta unidades narrativas completas
         2. Si unidad > 12s → subdividir en momentos visuales dinámicos
         3. Mantiene sincronización exacta con audio REAL
         4. Considera transiciones y fades
-        5. NUEVO: Corrige codificación de caracteres
-        6. NUEVO: Evita cortes en medio de frases importantes
         """
         if not transcription_segments:
             return []
         
-        # PASO 0: Corregir codificación de caracteres en todos los segmentos
-        transcription_segments = self._fix_encoding_in_segments(transcription_segments)
-        
-        # PARÁMETROS OPTIMIZADOS PARA CONTEXTO Y DINAMISMO
+        # PARÁMETROS OPTIMIZADOS PARA DINAMISMO
         MAX_NARRATIVE_UNIT = 15.0   # Máximo para unidad narrativa (reducido)
         TARGET_IMAGE_DURATION = 8.0  # Duración ideal por imagen (más dinámico)
         MAX_IMAGE_DURATION = 12.0    # Máximo absoluto por imagen (límite estricto)
-        MIN_NARRATIVE_DURATION = 6.0  # AUMENTADO: Mínimo para mantener contexto
+        MIN_NARRATIVE_DURATION = 4.0  # Mínimo para evitar cortes muy rápidos
         TRANSITION_DURATION = 1.0     # Duración de transiciones
         
         logger.info(f"🎬 Creando escenas dinámicas V2:")
@@ -451,7 +446,7 @@ class SceneGenerator:
     def _subdivide_using_audio_segments(self, unit_segments: List[Dict], target_duration: float, max_duration: float, min_duration: float) -> List[Dict]:
         """
         Subdivide usando los segmentos reales del audio para máxima precisión.
-        MEJORADA V2.1: Usa timestamps exactos + evita cortes problemáticos.
+        NUEVA FUNCIÓN: Usa timestamps exactos del audio generado.
         """
         
         if not unit_segments:
@@ -462,7 +457,7 @@ class SceneGenerator:
         current_moment_start = unit_segments[0]['start']
         current_moment_duration = 0.0
         
-        logger.info(f"    📡 Usando {len(unit_segments)} segmentos de audio para subdivisión precisa (V2.1)")
+        logger.info(f"    📡 Usando {len(unit_segments)} segmentos de audio para subdivisión precisa")
         
         for i, segment in enumerate(unit_segments):
             current_moment_segments.append(segment)
@@ -482,12 +477,11 @@ class SceneGenerator:
                 should_close_moment = True
                 close_reason = f"límite máximo ({current_moment_duration:.1f}s >= {max_duration}s)"
             
-            # Ha alcanzado duración objetivo Y hay un buen punto de corte (MEJORADO)
+            # Ha alcanzado duración objetivo Y hay un buen punto de corte
             elif (current_moment_duration >= target_duration and 
-                  self._is_good_audio_cut_point(segment['text']) and
-                  not self._is_problematic_cut(segment['text'])):
+                  self._is_good_audio_cut_point(segment['text'])):
                 should_close_moment = True
-                close_reason = f"duración objetivo + punto de corte natural (sin problemas)"
+                close_reason = f"duración objetivo + punto de corte natural"
             
             # Hay una pausa larga después de este segmento
             elif i < len(unit_segments) - 1:
@@ -499,69 +493,45 @@ class SceneGenerator:
                     close_reason = f"pausa natural ({pause_duration:.1f}s)"
             
             if should_close_moment:
-                # Crear momento visual con timestamps EXACTOS (sin extensiones)
+                # Crear momento visual con timestamps reales
                 moment_text = " ".join(seg['text'].strip() for seg in current_moment_segments)
-                moment_end = segment['end']  # Usar timestamp exacto del audio
+                moment_end = segment['end']
                 actual_duration = moment_end - current_moment_start
                 
-                # CORRECCIÓN: Asegurar que no hay extensiones artificiales
-                # El momento debe terminar exactamente donde termina el audio real
-                
-                # NUEVA VALIDACIÓN: Verificar contexto completo antes de crear momento
-                if actual_duration >= min_duration and self._has_complete_context(moment_text):
+                # Validar duración mínima
+                if actual_duration >= min_duration:
                     moments.append({
                         'text': moment_text,
                         'start': current_moment_start,
                         'end': moment_end,
                         'duration': actual_duration,
                         'segments_count': len(current_moment_segments),
-                        'close_reason': close_reason,
-                        'context_complete': True
+                        'close_reason': close_reason
                     })
                     
                     logger.info(f"      ✓ Momento: {actual_duration:.1f}s ({close_reason})")
                 else:
-                    # Si es muy corto O le falta contexto, combinar con el momento anterior
+                    # Si es muy corto, combinar con el momento anterior
                     if moments:
                         last_moment = moments[-1]
-                        # Verificar si la combinación mejora el contexto
-                        combined_text = last_moment['text'] + " " + moment_text
+                        last_moment['text'] += " " + moment_text
+                        last_moment['end'] = moment_end
+                        last_moment['duration'] = moment_end - last_moment['start']
+                        last_moment['segments_count'] += len(current_moment_segments)
                         
-                        if self._improves_context(last_moment['text'], combined_text):
-                            last_moment['text'] = combined_text
-                            last_moment['end'] = moment_end
-                            last_moment['duration'] = moment_end - last_moment['start']
-                            last_moment['segments_count'] += len(current_moment_segments)
-                            last_moment['context_complete'] = True
-                            
-                            logger.info(f"      🔗 Combinado para mejorar contexto: {last_moment['duration']:.1f}s")
-                        else:
-                            # Crear momento separado si no mejora el contexto
-                            moments.append({
-                                'text': moment_text,
-                                'start': current_moment_start,
-                                'end': moment_end,
-                                'duration': actual_duration,
-                                'segments_count': len(current_moment_segments),
-                                'close_reason': f"{close_reason} (contexto independiente)",
-                                'context_complete': self._has_complete_context(moment_text)
-                            })
+                        logger.info(f"      🔗 Combinado con momento anterior: {last_moment['duration']:.1f}s")
                     else:
-                        # Es el primer momento, mantenerlo aunque sea corto
+                        # Es el primer momento y es muy corto, mantenerlo
                         moments.append({
                             'text': moment_text,
                             'start': current_moment_start,
                             'end': moment_end,
                             'duration': actual_duration,
                             'segments_count': len(current_moment_segments),
-                            'close_reason': f"{close_reason} (primer momento)",
-                            'context_complete': self._has_complete_context(moment_text)
+                            'close_reason': f"{close_reason} (forzado por ser primero)"
                         })
                         
-                        if actual_duration < min_duration:
-                            logger.warning(f"      ⚠️ Primer momento corto: {actual_duration:.1f}s")
-                        else:
-                            logger.info(f"      ✓ Primer momento: {actual_duration:.1f}s")
+                        logger.warning(f"      ⚠️ Momento corto mantenido: {actual_duration:.1f}s")
                 
                 # Iniciar nuevo momento
                 current_moment_segments = []
@@ -1810,147 +1780,4 @@ class SceneGenerator:
             return True
         
         logger.info("🎭 Dossier NO requerido - Proyecto no parece biográfico/histórico")
-        return False
-
-    def _fix_encoding_in_segments(self, transcription_segments):
-        """
-        Corrige problemas de codificación de caracteres en todos los segmentos.
-        """
-        
-        logger.info("🔤 Corrigiendo codificación de caracteres...")
-        
-        # Mapa de correcciones de codificación
-        encoding_fixes = {
-            '√°': 'á', '√©': 'é', '√≠': 'í', '√≥': 'ó', '√∫': 'ú', '√±': 'ñ',
-            '√Å': 'Á', '√É': 'É', '√Í': 'Í', '√ì': 'Ó', '√ö': 'Ú', '√Ñ': 'Ñ'
-        }
-        
-        fixed_segments = []
-        fixes_applied = 0
-        
-        for segment in transcription_segments:
-            fixed_segment = segment.copy()
-            original_text = segment.get('text', '')
-            fixed_text = original_text
-            
-            # Aplicar correcciones
-            for wrong_char, correct_char in encoding_fixes.items():
-                if wrong_char in fixed_text:
-                    fixed_text = fixed_text.replace(wrong_char, correct_char)
-                    fixes_applied += 1
-            
-            if fixed_text != original_text:
-                fixed_segment['text'] = fixed_text
-            
-            fixed_segments.append(fixed_segment)
-        
-        if fixes_applied > 0:
-            logger.info(f"✅ {fixes_applied} correcciones de codificación aplicadas")
-        
-        return fixed_segments
-
-    def _fix_encoding_in_segments(self, transcription_segments):
-        """
-        Corrige problemas de codificación de caracteres en todos los segmentos.
-        """
-        
-        logger.info("🔤 Corrigiendo codificación de caracteres...")
-        
-        # Mapa de correcciones de codificación
-        encoding_fixes = {
-            "√°": "á", "√©": "é", "√≠": "í", "√≥": "ó", "√∫": "ú", "√±": "ñ",
-            "√Å": "Á", "√É": "É", "√Í": "Í", "√ì": "Ó", "√ö": "Ú", "√Ñ": "Ñ"
-        }
-        
-        fixed_segments = []
-        fixes_applied = 0
-        
-        for segment in transcription_segments:
-            fixed_segment = segment.copy()
-            original_text = segment.get("text", "")
-            fixed_text = original_text
-            
-            # Aplicar correcciones
-            for wrong_char, correct_char in encoding_fixes.items():
-                if wrong_char in fixed_text:
-                    fixed_text = fixed_text.replace(wrong_char, correct_char)
-                    fixes_applied += 1
-            
-            if fixed_text != original_text:
-                fixed_segment["text"] = fixed_text
-            
-            fixed_segments.append(fixed_segment)
-        
-        if fixes_applied > 0:
-            logger.info(f"✅ {fixes_applied} correcciones de codificación aplicadas")
-        
-        return fixed_segments
-
-    def _has_complete_context(self, text: str) -> bool:
-        """
-        Verifica si un texto tiene contexto narrativo completo.
-        Evita escenas fragmentadas como "para siempre." o "pero su apariencia lo decía todo."
-        """
-        
-        text_stripped = text.strip()
-        
-        if len(text_stripped) < 10:  # Muy corto
-            return False
-        
-        # Verificar que no termine abruptamente
-        abrupt_endings = [
-            r'\bpero\s*\.?\s*$',           # Termina en "pero"
-            r'\by\s*\.?\s*$',              # Termina en "y"  
-            r'\bque\s*\.?\s*$',            # Termina en "que"
-            r'\bde\s*\.?\s*$',             # Termina en "de"
-            r'\bla\s*\.?\s*$',             # Termina en "la"
-            r'\bel\s*\.?\s*$',             # Termina en "el"
-            r'\bun\s*\.?\s*$',             # Termina en "un"
-            r'\buna\s*\.?\s*$',            # Termina en "una"
-            r'\bsu\s*\.?\s*$',             # Termina en "su"
-        ]
-        
-        import re
-        for pattern in abrupt_endings:
-            if re.search(pattern, text_stripped.lower()):
-                return False
-        
-        # Verificar que tenga al menos un verbo (acción)
-        verbs = [
-            'fue', 'era', 'está', 'estaba', 'tiene', 'tenía', 'hace', 'hacía',
-            'dijo', 'dice', 'habló', 'habla', 'vivió', 'vive', 'murió', 'muere',
-            'nació', 'nace', 'creó', 'crea', 'escribió', 'escribe', 'pintó', 'pinta'
-        ]
-        
-        text_lower = text_stripped.lower()
-        has_verb = any(verb in text_lower for verb in verbs)
-        
-        # Verificar que tenga sustantivo (sujeto/objeto)
-        nouns = [
-            'hombre', 'mujer', 'persona', 'vida', 'historia', 'obra', 'tiempo',
-            'lugar', 'ciudad', 'casa', 'iglesia', 'rey', 'reina', 'santo', 'santa'
-        ]
-        
-        has_noun = any(noun in text_lower for noun in nouns)
-        
-        # Contexto completo = tiene verbo Y sustantivo Y no termina abruptamente
-        return has_verb and has_noun
-    
-    def _improves_context(self, current_text: str, combined_text: str) -> bool:
-        """
-        Verifica si combinar textos mejora el contexto narrativo.
-        """
-        
-        # Si el texto actual ya tiene contexto completo, no combinar
-        if self._has_complete_context(current_text):
-            return False
-        
-        # Si la combinación crea contexto completo, combinar
-        if self._has_complete_context(combined_text):
-            return True
-        
-        # Si ninguno tiene contexto completo, combinar si no es demasiado largo
-        if len(combined_text) < 200:  # Límite razonable
-            return True
-        
         return False

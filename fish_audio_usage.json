@@ -1,6 +1,6 @@
 {
-  "total_bytes_processed": 114286,
-  "total_cost_usd": 1.71429,
+  "total_bytes_processed": 143242,
+  "total_cost_usd": 2.1486300000000003,
   "daily_usage": {
     "2025-06-29": {
       "bytes_processed": 35527,
@@ -19,11 +19,11 @@
       }
     },
     "2025-07-03": {
-      "bytes_processed": 42812,
-      "cost_usd": 0.64218,
-      "requests": 4,
+      "bytes_processed": 71768,
+      "cost_usd": 1.07652,
+      "requests": 5,
       "models_used": {
-        "speech-1.6": 4
+        "speech-1.6": 5
       }
     }
   },
@@ -34,9 +34,9 @@
       "requests": 7
     },
     "2025-07": {
-      "bytes_processed": 42812,
-      "cost_usd": 0.64218,
-      "requests": 4
+      "bytes_processed": 71768,
+      "cost_usd": 1.07652,
+      "requests": 5
     }
   },
   "usage_history": [
@@ -125,6 +125,14 @@
       "text_length": 19377,
       "bytes_processed": 19840,
       "cost_usd": 0.2976,
+      "model": "speech-1.6",
+      "date": "2025-07-03"
+    },
+    {
+      "timestamp": "2025-07-03T19:39:43.041704",
+      "text_length": 28358,
+      "bytes_processed": 28956,
+      "cost_usd": 0.43434,
       "model": "speech-1.6",
       "date": "2025-07-03"
     }

@@ -377,67 +377,93 @@ def generate_fish_audio_audio(
     mp3_bitrate: int = 128,
     normalize: bool = True,
     latency: str = "normal",
-    output_dir: str = "audio"
+    output_dir: str = "audio",
+    # NUEVO: Límite de caracteres para la división del texto
+    chunk_size: int = 4000
 ) -> str:
     """
     Genera un archivo de audio a partir de texto usando Fish Audio TTS.
-    
-    Args:
-        text (str): Texto a convertir en audio
-        api_key (str): API key de Fish Audio
-        reference_id (str, optional): ID del modelo de referencia
-        model (str): Modelo a usar (speech-1.5, speech-1.6, s1)
-        format (str): Formato de salida (wav, pcm, mp3)
-        mp3_bitrate (int): Bitrate para MP3 (64, 128, 192)
-        normalize (bool): Normalizar texto
-        latency (str): Modo de latencia (normal, balanced)
-        output_dir (str): Directorio donde guardar el audio
-    
-    Returns:
-        str: Ruta al archivo de audio generado
+    MEJORADO: Ahora divide el texto en chunks para manejar guiones largos de forma robusta.
     """
     if not FISH_AUDIO_AVAILABLE:
         raise ImportError("Fish Audio SDK no está disponible. Instala 'fish-audio-sdk' para usar Fish Audio TTS.")
     
-    # Crear directorio de salida si no existe
     os.makedirs(output_dir, exist_ok=True)
     
-    # Generar nombre de archivo único
-    output_file = os.path.join(output_dir, f"audio_fish_{hash(text)}.{format}")
-    
+    # Dividir el texto en chunks para evitar límites de la API
+    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    logger.info(f"Texto dividido en {len(chunks)} chunks para procesar con Fish Audio.")
+
+    temp_files = []
+    # Usar un hash del texto completo para el nombre del archivo final para consistencia
+    output_file = os.path.join(output_dir, f"audio_fish_{abs(hash(text))}.{format}")
+
     try:
-        # Trackear uso ANTES de generar audio
         tracker = get_fish_audio_tracker()
-        usage_info = tracker.track_usage(text, model)
-        
-        # Mostrar información de uso
-        logger.info(f"🐟 Fish Audio - Bytes procesados: {usage_info['bytes_processed']:,}, Costo: ${usage_info['cost_usd']:.4f}")
-        
-        # Mostrar alertas si las hay
-        if usage_info['alerts']:
-            for alert in usage_info['alerts']:
-                logger.warning(f"🐟 Fish Audio Alert: {alert}")
-        
-        # Crear sesión de Fish Audio
         session = Session(api_key)
+
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Procesando chunk {i+1}/{len(chunks)} con Fish Audio...")
+            
+            # Añadir un retardo para no superar el rate limit de la API
+            if i > 0:
+                import time
+                time.sleep(0.25) # 250ms de retardo entre chunks
+
+            # Trackear uso por chunk
+            usage_info = tracker.track_usage(chunk, model)
+            logger.info(f"🐟 Fish Audio - Chunk {i+1}: Bytes: {usage_info['bytes_processed']:,}, Costo: ${usage_info['cost_usd']:.4f}")
+            if usage_info['alerts']:
+                for alert in usage_info['alerts']:
+                    logger.warning(f"🐟 Fish Audio Alert: {alert}")
+
+            request = TTSRequest(reference_id=reference_id, text=chunk)
+            
+            # Crear un archivo temporal para cada chunk
+            temp_file_path = tempfile.mktemp(suffix=f"_chunk_{i}.{format}")
+            
+            with open(temp_file_path, "wb") as f:
+                for audio_chunk in session.tts(request):
+                    f.write(audio_chunk)
+            
+            if os.path.exists(temp_file_path) and os.path.getsize(temp_file_path) > 0:
+                temp_files.append(temp_file_path)
+                logger.info(f"Chunk {i+1} de audio generado: {temp_file_path}")
+            else:
+                logger.warning(f"El chunk {i+1} no generó un archivo de audio válido.")
+
+        if not temp_files:
+            raise RuntimeError("No se pudo generar ningún chunk de audio con Fish Audio.")
+
+        # Concatenar los archivos de audio si hay más de uno
+        if len(temp_files) > 1:
+            from moviepy.editor import concatenate_audioclips, AudioFileClip
+            logger.info(f"Concatenando {len(temp_files)} chunks de audio...")
+            clips = [AudioFileClip(f) for f in temp_files]
+            final_clip = concatenate_audioclips(clips)
+            final_clip.write_audiofile(output_file, logger=None) # logger=None para evitar spam
+            final_clip.close()
+            for clip in clips:
+                clip.close()
+        else:
+            # Si solo hay un chunk, simplemente mover/renombrar el archivo
+            import shutil
+            shutil.move(temp_files[0], output_file)
         
-        # Crear request
-        request = TTSRequest(
-            reference_id=reference_id,
-            text=text
-        )
-        
-        # Generar audio
-        with open(output_file, "wb") as f:
-            for chunk in session.tts(request):
-                f.write(chunk)
-        
-        logger.info(f"Audio Fish generado exitosamente: {output_file}")
+        logger.info(f"Audio Fish final ensamblado exitosamente: {output_file}")
         return output_file
         
     except Exception as e:
-        logger.error(f"Error generando audio con Fish Audio: {e}")
+        logger.error(f"Error generando audio con Fish Audio: {e}", exc_info=True)
         raise
+    finally:
+        # Limpieza final de archivos temporales
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except OSError as e:
+                    logger.error(f"Error eliminando archivo temporal {temp_file}: {e}")
 
 def generate_fish_audio_raw_api(
     text: str,
@@ -551,7 +577,7 @@ def list_fish_audio_models() -> List[Dict[str, Any]]:
 
 def generate_tts_audio(
     text: str,
-    tts_provider: str = "edge",
+    tts_provider: str = "fish",
     voice: str = "es-ES-AlvaroNeural",
     rate: str = "+0%",
     pitch: str = "+0Hz",

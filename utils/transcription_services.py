@@ -295,81 +295,72 @@ class ReplicateTranscriptionService:
     def _process_replicate_output(self, output: Dict, audio_path: str) -> Tuple[List[Dict], Dict]:
         """
         Procesa la salida de Replicate y la convierte al formato estándar.
-        
-        Args:
-            output: Salida de Replicate
-            audio_path: Ruta del archivo de audio original
-            
-        Returns:
-            Tuple[List[Dict], Dict]: Segmentos procesados y metadata
+        MEJORADO: Manejo más robusto de la salida para evitar truncamientos silenciosos.
         """
         try:
-            # La salida de Replicate puede tener diferentes formatos
-            if isinstance(output, dict):
-                # Formato JSON completo
-                text = output.get("text", "")
-                chunks = output.get("chunks", [])
-                language = output.get("language", "unknown")
-                language_probability = output.get("language_probability", 0.0)
-            elif isinstance(output, str):
-                # Solo texto
-                text = output
-                chunks = []
-                language = "unknown"
-                language_probability = 0.0
-            else:
-                logger.warning(f"Formato de salida inesperado de Replicate: {type(output)}")
-                text = str(output)
-                chunks = []
-                language = "unknown"
-                language_probability = 0.0
-            
-            # Procesar chunks si están disponibles
+            if not isinstance(output, dict) or "chunks" not in output:
+                logger.error(f"Salida inesperada o incompleta de Replicate: No es un diccionario o no contiene 'chunks'. Salida: {str(output)[:500]}")
+                # Devolver vacío para que el proceso falle explícitamente
+                return [], {"error": "Formato de salida de Replicate inválido", "output_received": str(output)[:500]}
+
+            chunks = output.get("chunks", [])
+            if not chunks:
+                logger.warning(f"Replicate devolvió una lista de 'chunks' vacía para {audio_path}. La transcripción podría estar vacía.")
+                # Devolver vacío si no hay chunks, ya que no hay nada que procesar
+                return [], {"error": "Lista de chunks vacía", "audio_path": audio_path}
+
             segments = []
             all_words = []
-            
-            if chunks:
-                # Usar chunks con timestamps
-                for chunk in chunks:
-                    if isinstance(chunk, dict):
-                        # Replicate devuelve timestamps en formato [start, end]
-                        timestamp = chunk.get("timestamp", [0, 0])
-                        start_time = timestamp[0] if len(timestamp) > 0 else 0
-                        end_time = timestamp[1] if len(timestamp) > 1 else 0
-                        
-                        segment_info = {
-                            "text": chunk.get("text", ""),
-                            "start": round(start_time, 2),
-                            "end": round(end_time, 2),
-                            "words": []
-                        }
-                        
-                        # Procesar palabras si están disponibles
-                        words = chunk.get("words", [])
-                        for word in words:
-                            if isinstance(word, dict):
-                                word_info = {
-                                    "text": word.get("text", ""),
-                                    "start": round(word.get("start", 0), 2),
-                                    "end": round(word.get("end", 0), 2)
-                                }
-                                all_words.append(word_info)
-                                segment_info["words"].append(word_info)
-                        
-                        segments.append(segment_info)
-            else:
-                # Si no hay chunks, crear un segmento único
+            full_text_from_chunks = []
+
+            for chunk in chunks:
+                if not isinstance(chunk, dict) or "text" not in chunk or "timestamp" not in chunk:
+                    logger.warning(f"Saltando chunk mal formado en la respuesta de Replicate: {chunk}")
+                    continue
+
+                timestamp = chunk.get("timestamp", [0, 0])
+                start_time = timestamp[0] if len(timestamp) > 0 else 0
+                end_time = timestamp[1] if len(timestamp) > 1 else 0
+                text = chunk.get("text", "").strip()
+                
+                if not text:
+                    continue
+
+                full_text_from_chunks.append(text)
                 segment_info = {
                     "text": text,
-                    "start": 0.0,
-                    "end": 0.0,  # Se puede estimar basado en la duración del audio
+                    "start": round(start_time, 2),
+                    "end": round(end_time, 2),
                     "words": []
                 }
+                
+                words = chunk.get("words", [])
+                if words and isinstance(words, list):
+                    for word in words:
+                        if isinstance(word, dict):
+                            word_info = {
+                                "text": word.get("text", ""),
+                                "start": round(word.get("start", 0), 2),
+                                "end": round(word.get("end", 0), 2)
+                            }
+                            all_words.append(word_info)
+                            segment_info["words"].append(word_info)
+                
                 segments.append(segment_info)
-            
+
+            # Comparar el texto completo de los chunks con el texto de nivel superior si existe
+            top_level_text = output.get("text", "").strip()
+            assembled_text = " ".join(full_text_from_chunks)
+            if top_level_text and len(top_level_text) > len(assembled_text) * 0.9:
+                 logger.info("El texto de nivel superior de Replicate parece completo, usando ese.")
+            elif not segments:
+                 logger.error(f"No se pudieron procesar segmentos válidos de Replicate para {audio_path}")
+                 return [], {"error": "No se procesaron segmentos válidos", "audio_path": audio_path}
+
+
             metadata = {
-                "language": language,
-                "language_probability": language_probability,
+                "language": output.get("language", "unknown"),
+                "language_probability": output.get("language_probability", 0.0),
                 "num_words": len(all_words),
                 "num_segments": len(segments),
                 "audio_path": audio_path,
@@ -379,13 +370,13 @@ class ReplicateTranscriptionService:
             return segments, metadata
             
         except Exception as e:
-            logger.error(f"Error procesando salida de Replicate: {e}")
+            logger.error(f"Error crítico procesando salida de Replicate para {audio_path}: {e}", exc_info=True)
             # Devolver formato básico en caso de error
-            return [{"text": str(output), "start": 0.0, "end": 0.0, "words": []}], {
+            return [], {
                 "language": "unknown",
                 "language_probability": 0.0,
                 "num_words": 0,
-                "num_segments": 1,
+                "num_segments": 0,
                 "audio_path": audio_path,
                 "model_id": self.model_id,
                 "error": str(e)
