@@ -212,49 +212,60 @@ class VideoProcessor:
         logger.info(f"Directorio proyecto configurado: {project_folder}")
         return project_info
 
-    def process_single_video(self, full_config: Dict) -> Optional[Path]:
+    def process_single_video(self, full_config: Dict, existing_project_info: Optional[Dict] = None) -> Optional[Path]:
         project_info = {} 
         base_video_clip_obj = None
         final_video_clip = None
-        # final_video_path = None # Redundant, final_video_path is defined in the new code
         script_content = "" 
         
         try:
-            project_info = self._setup_single_project(full_config)
-            base_path = Path(project_info["base_path"])
-            project_id = project_info["id"]
+            if existing_project_info:
+                project_info = existing_project_info
+                base_path = Path(project_info["base_path"])
+                project_id = project_info["id"]
+                logger.info(f"[{project_id}] Reanudando procesamiento para proyecto existente: {project_info['titulo']}")
+            else:
+                project_info = self._setup_single_project(full_config)
+                base_path = Path(project_info["base_path"])
+                project_id = project_info["id"]
+                logger.info(f"[{project_id}] Iniciando nuevo proyecto: {project_info['titulo']}")
             logger.info(f"[{project_id}] Iniciando: {project_info['titulo']}")
 
             # --- 1. Script --- 
             script_config_ui = full_config.get("script", {})
             script_mode = script_config_ui.get("mode", "Generar con IA")
             logger.info(f"[{project_id}] Guion (Modo: {script_mode})...")
-            if script_mode == "Proporcionar Manualmente":
-                script_content = script_config_ui.get("manual_script", "")
-                if not script_content: raise ValueError("Guion manual vacío.")
-                script_path = base_path / "script.txt"
-                script_path.write_text(script_content, encoding='utf-8')
-                project_info["script_path"] = str(script_path)
-                project_info["script_source"] = "manual"
-            else: 
-                prompt_obj = script_config_ui.get('prompt_obj')
-                if not prompt_obj: raise ValueError("Plantilla guion no encontrada.")
-                # Asegurar que titulo y contexto se obtienen de project_info para la plantilla
-                user_prompt = prompt_obj.get("user_prompt", "").format(
-                    titulo=project_info.get("titulo", ""), 
-                    contexto=project_info.get("contexto", "")
-                )
-                system_prompt = prompt_obj.get("system_prompt", "")
-                script_content = self.ai_service.generate_content(
-                    provider=script_config_ui.get('provider', 'openai').lower(), 
-                    model=script_config_ui.get('model', 'gpt-3.5-turbo'),
-                    system_prompt=system_prompt, user_prompt=user_prompt
-                )
-                if not script_content or "[ERROR]" in script_content: raise RuntimeError(f"Fallo guion IA: {script_content}")
-                script_path = base_path / "script.txt"
-                script_path.write_text(script_content, encoding='utf-8')
-                project_info["script_path"] = str(script_path)
-                project_info["script_source"] = "ia"
+            
+            script_path_str = project_info.get("script_path")
+            if script_path_str and Path(script_path_str).exists():
+                script_content = Path(script_path_str).read_text(encoding='utf-8')
+                logger.info(f"[{project_id}] Guion cargado desde archivo existente: {script_path_str}")
+            else:
+                if script_mode == "Proporcionar Manualmente":
+                    script_content = script_config_ui.get("manual_script", "")
+                    if not script_content: raise ValueError("Guion manual vacío.")
+                    script_path = base_path / "script.txt"
+                    script_path.write_text(script_content, encoding='utf-8')
+                    project_info["script_path"] = str(script_path)
+                    project_info["script_source"] = "manual"
+                else: 
+                    prompt_obj = script_config_ui.get('prompt_obj')
+                    if not prompt_obj: raise ValueError("Plantilla guion no encontrada.")
+                    user_prompt = prompt_obj.get("user_prompt", "").format(
+                        titulo=project_info.get("titulo", ""), 
+                        contexto=project_info.get("contexto", "")
+                    )
+                    system_prompt = prompt_obj.get("system_prompt", "")
+                    script_content = self.ai_service.generate_content(
+                        provider=script_config_ui.get('provider', 'openai').lower(), 
+                        model=script_config_ui.get('model', 'gpt-3.5-turbo'),
+                        system_prompt=system_prompt, user_prompt=user_prompt
+                    )
+                    if not script_content or "[ERROR]" in script_content: raise RuntimeError(f"Fallo guion IA: {script_content}")
+                    script_path = base_path / "script.txt"
+                    script_path.write_text(script_content, encoding='utf-8')
+                    project_info["script_path"] = str(script_path)
+                    project_info["script_source"] = "ia"
             project_info["status"] = "script_ok"; self._save_project_info(base_path, project_info)
 
             # --- 2. Audio (TTS) --- 
@@ -262,51 +273,63 @@ class VideoProcessor:
             audio_config_ui = full_config.get("audio", {}) # Necesario para _apply_audio después
             tts_settings = {k: v for k, v in audio_config_ui.items() if k.startswith('tts_')}
             
-            # Obtener configuración de TTS
-            tts_provider = tts_settings.get('tts_provider', 'fish')
-            from utils.audio_services import generate_tts_audio
-            
-            if tts_provider == 'edge':
-                # Configuración para Edge TTS
-                audio_path_generated = generate_tts_audio(
-                    text=script_content,
-                    tts_provider='edge',
-                    voice=tts_settings.get('tts_voice', self.video_gen_config.get('audio',{}).get('default_voice','es-ES-AlvaroNeural')),
-                    rate=f"{tts_settings.get('tts_speed_percent', 0):+d}%",
-                    pitch=f"{tts_settings.get('tts_pitch_hz', 0):+d}Hz",
-                    output_dir=str(base_path / "audio")
-                )
-            elif tts_provider == 'fish':
-                # Configuración para Fish Audio
-                fish_config = self.tts_config.get('fish_audio', {})
-                audio_path_generated = generate_tts_audio(
-                    text=script_content,
-                    tts_provider='fish',
-                    output_dir=str(base_path / "audio"),
-                    fish_api_key=fish_config.get('api_key'),
-                    fish_reference_id=fish_config.get('reference_id'),
-                    fish_model=tts_settings.get('tts_fish_model', fish_config.get('default_model', 'speech-1.6')),
-                    fish_format=tts_settings.get('tts_fish_format', fish_config.get('default_format', 'mp3')),
-                    fish_mp3_bitrate=tts_settings.get('tts_fish_bitrate', fish_config.get('default_mp3_bitrate', 128)),
-                    fish_normalize=tts_settings.get('tts_fish_normalize', fish_config.get('default_normalize', True)),
-                    fish_latency=tts_settings.get('tts_fish_latency', fish_config.get('default_latency', 'normal'))
-                )
+            audio_path_generated = project_info.get("audio_path")
+            if audio_path_generated and Path(audio_path_generated).exists():
+                try:
+                    with AudioFileClip(audio_path_generated) as temp_audio_clip:
+                        project_info["audio_duration"] = temp_audio_clip.duration
+                    if project_info["audio_duration"] is None or project_info["audio_duration"] <= 0:
+                        raise ValueError("La duración del audio TTS cargado es inválida.")
+                    logger.info(f"[{project_id}] Audio cargado desde archivo existente: {audio_path_generated} ({project_info['audio_duration']:.2f}s)")
+                except Exception as e_adur:
+                    logger.error(f"[{project_id}] Error cargando duración del audio TTS {audio_path_generated}: {e_adur}")
+                    raise RuntimeError(f"Fallo crítico al cargar audio TTS: {e_adur}")
             else:
-                raise ValueError(f"Proveedor TTS no soportado: {tts_provider}")
+                # Obtener configuración de TTS
+                tts_provider = tts_settings.get('tts_provider', 'fish')
+                from utils.audio_services import generate_tts_audio
                 
-            if not audio_path_generated or not Path(audio_path_generated).exists(): 
-                raise RuntimeError("Fallo audio TTS: No se generó el archivo o no se encontró.")
-            project_info["audio_path"] = audio_path_generated
-            try:
-                with AudioFileClip(audio_path_generated) as temp_audio_clip: # Asegurar cierre
-                    project_info["audio_duration"] = temp_audio_clip.duration
-                if project_info["audio_duration"] is None or project_info["audio_duration"] <=0:
-                    raise ValueError("La duración del audio TTS es inválida.")
-            except Exception as e_adur:
-                logger.error(f"[{project_id}] Error obteniendo duración del audio TTS {audio_path_generated}: {e_adur}")
-                raise RuntimeError(f"Fallo crítico al procesar duración de audio TTS: {e_adur}")
+                if tts_provider == 'edge':
+                    # Configuración para Edge TTS
+                    audio_path_generated = generate_tts_audio(
+                        text=script_content,
+                        tts_provider='edge',
+                        voice=tts_settings.get('tts_voice', self.video_gen_config.get('audio',{}).get('default_voice','es-ES-AlvaroNeural')),
+                        rate=f"{tts_settings.get('tts_speed_percent', 0):+d}%",
+                        pitch=f"{tts_settings.get('tts_pitch_hz', 0):+d}Hz",
+                        output_dir=str(base_path / "audio")
+                    )
+                elif tts_provider == 'fish':
+                    # Configuración para Fish Audio
+                    fish_config = self.tts_config.get('fish_audio', {})
+                    audio_path_generated = generate_tts_audio(
+                        text=script_content,
+                        tts_provider='fish',
+                        output_dir=str(base_path / "audio"),
+                        fish_api_key=fish_config.get('api_key'),
+                        fish_reference_id=fish_config.get('reference_id'),
+                        fish_model=tts_settings.get('tts_fish_model', fish_config.get('default_model', 'speech-1.6')),
+                        fish_format=tts_settings.get('tts_fish_format', fish_config.get('default_format', 'mp3')),
+                        fish_mp3_bitrate=tts_settings.get('tts_fish_bitrate', fish_config.get('default_mp3_bitrate', 128)),
+                        fish_normalize=tts_settings.get('tts_fish_normalize', fish_config.get('default_normalize', True)),
+                        fish_latency=tts_settings.get('tts_fish_latency', fish_config.get('default_latency', 'normal'))
+                    )
+                else:
+                    raise ValueError(f"Proveedor TTS no soportado: {tts_provider}")
+                    
+                if not audio_path_generated or not Path(audio_path_generated).exists(): 
+                    raise RuntimeError("Fallo audio TTS: No se generó el archivo o no se encontró.")
+                project_info["audio_path"] = audio_path_generated
+                try:
+                    with AudioFileClip(audio_path_generated) as temp_audio_clip: # Asegurar cierre
+                        project_info["audio_duration"] = temp_audio_clip.duration
+                    if project_info["audio_duration"] is None or project_info["audio_duration"] <=0:
+                        raise ValueError("La duración del audio TTS es inválida.")
+                except Exception as e_adur:
+                    logger.error(f"[{project_id}] Error obteniendo duración del audio TTS {audio_path_generated}: {e_adur}")
+                    raise RuntimeError(f"Fallo crítico al procesar duración de audio TTS: {e_adur}")
 
-            logger.info(f"[{project_id}] Audio generado: {audio_path_generated} ({project_info['audio_duration']:.2f}s)")
+                logger.info(f"[{project_id}] Audio generado: {audio_path_generated} ({project_info['audio_duration']:.2f}s)")
             project_info["status"] = "audio_ok"; self._save_project_info(base_path, project_info)
 
             # --- 3. Transcripción (SIEMPRE la generamos ahora si no existe, para segmentar por tiempo) ---
@@ -346,202 +369,86 @@ class VideoProcessor:
             logger.info(f"[{project_id}] Generando escenas y prompts...")
             if self.scene_generator is None: self.scene_generator = SceneGenerator(config=self.void_config) 
 
-            # Usar "scenes_config" de full_config para más claridad
-            scenes_ui_config = full_config.get("scenes_config", {}) 
-            segmentation_mode = scenes_ui_config.get("segmentation_mode", "Automático (Texto)") 
-            
-            # Actualizar los atributos de scene_generator con la configuración de la UI
-            self.scene_generator.max_scene_duration = scenes_ui_config.get("max_scene_duration", 12.0)
-            self.scene_generator.use_auto_duration = full_config.get("video", {}).get("use_auto_duration", True)
-            self.scene_generator.duration_per_image_manual = full_config.get("video", {}).get("duration_per_image_manual", 10.0)
-            
-            logger.info(f"[{project_id}] SceneGenerator actualizado con: max_scene_duration={self.scene_generator.max_scene_duration}, use_auto_duration={self.scene_generator.use_auto_duration}, duration_per_image_manual={self.scene_generator.duration_per_image_manual}")
+            scenes_config = full_config.get("scenes_config", {})
+            image_prompt_config = full_config.get("image", {})
 
-            image_config_ui = full_config.get("image", {})
-            # Pasar el objeto prompt completo a scene_generator, ya que este sabe cómo extraer system y user.
-            img_prompt_config = {
-                "img_prompt_provider": image_config_ui.get("img_prompt_provider"),
-                "img_prompt_model": image_config_ui.get("img_prompt_model"),
-                "prompt_obj": image_config_ui.get("prompt_obj"), # Este es el objeto con 'system_prompt' y 'user_prompt'
-                "style": image_config_ui.get("style", ""), # ¡AÑADIR LA VARIABLE STYLE!
-                # También pasar configuraciones de modelos que podrían ser necesarias
-                "img_prompt_providers_priority": [image_config_ui.get("img_prompt_provider", "gemini")],
-                "img_prompt_models": {
-                    image_config_ui.get("img_prompt_provider", "gemini"): image_config_ui.get("img_prompt_model")
-                }
-            }
-            
-            # Logging para debug
-            logger.info(f"[{project_id}] Configuración de prompts de imagen: {img_prompt_config}")
-            
-            scenes_data = []
-            project_info['scene_generation_mode'] = segmentation_mode # Guardar para referencia
-
-            if segmentation_mode == "Por Párrafos (Híbrido)":
-                if not script_content or not segments:
-                    logger.warning(f"[{project_id}] Modo 'Por Párrafos' seleccionado pero falta guion o transcripción. Revirtiendo a 'Por Duración'.")
-                    segmentation_mode = "Por Duración (Basado en Audio)" # Revertir a la siguiente mejor opción
-                    project_info['scene_generation_mode'] = segmentation_mode
-                else:
-                    scenes_data = self.scene_generator.generate_scenes_from_script(
-                        script_content, 
-                        segments, 
-                        mode="Por Párrafos (Híbrido)",
-                        project_info=project_info,
-                        image_prompt_config=img_prompt_config,
-                        ai_service=self.ai_service
-                    )
-            
-            if segmentation_mode == "Por Duración (Basado en Audio)":
-                 if not segments:
-                      logger.warning(f"[{project_id}] Modo 'Por Duración' seleccionado pero no hay segmentos de transcripción. Revirtiendo a 'Automático (Texto)'.")
-                      project_info['scene_generation_mode'] = "Automático (Texto)" # Actualizar modo usado
-                      scenes_data = self.scene_generator.generate_scenes_and_prompts_from_text(
-                           script_content, project_info, img_prompt_config, self.ai_service)
-                 else:
-                      duration_control = scenes_ui_config.get("duration_control", "Automático")
-                      target_duration = 10.0 # Default
-                      if duration_control == "Manual":
-                           target_duration = scenes_ui_config.get("manual_duration_per_scene", 10.0)
-                      else: # Automático
-                           audio_duration = project_info.get('audio_duration', 0)
-                           if audio_duration > 0:
-                               # Estimar basado en ~10s por escena, o al menos 3 escenas.
-                               estimated_num_scenes = max(3, int(audio_duration / 10.0)) 
-                               target_duration = audio_duration / estimated_num_scenes
-                               target_duration = max(5.0, min(target_duration, 15.0)) # Clamp
-                           logger.info(f"[{project_id}] Duración de escena automática estimada: {target_duration:.2f}s")
-                      
-                      scenes_data = self.scene_generator.generate_prompts_for_timed_scenes(
-                           segments, target_duration, project_info, img_prompt_config, self.ai_service)
-            
-            if not scenes_data: # Si los modos anteriores fallaron o se seleccionó el modo texto
-                 project_info['scene_generation_mode'] = "Automático (Texto)" # Asegurar que esté puesto
-                 scenes_data = self.scene_generator.generate_scenes_and_prompts_from_text(
-                      script_content, project_info, img_prompt_config, self.ai_service)
-
-            if not scenes_data:
-                logger.error(f"[{project_id}] No se pudieron generar datos de escenas con modo: {project_info['scene_generation_mode']}.")
-                raise RuntimeError("Fallo crítico: No se pudieron generar datos de escenas.")
-
-            # --- VERIFICACIÓN CRÍTICA ---
-            # Comprobar si los prompts de imagen se generaron correctamente
-            if not all(s.get('image_prompt') and '[PROMPT FALTANTE]' not in s.get('image_prompt') for s in scenes_data):
-                logger.error(f"[{project_id}] Error crítico: La generación de prompts de imagen falló. Algunas escenas no tienen un prompt válido.")
-                # Opcional: Guardar las escenas para depuración incluso si fallaron los prompts
-                try:
-                    scenes_path_debug = base_path / "scenes_failed_prompts.json"
-                    self.scene_generator.save_scenes(scenes_data, str(scenes_path_debug), project_info)
-                    logger.info(f"[{project_id}] Datos de escenas con fallos guardados en: {scenes_path_debug}")
-                except Exception as save_err:
-                    logger.error(f"[{project_id}] No se pudieron guardar las escenas de depuración: {save_err}")
-                
-                raise RuntimeError("La generación de prompts de imagen falló. Revisa la configuración y el proveedor de IA.")
-
+            # Lógica para reanudar la generación de escenas
             scenes_path = base_path / "scenes.json"
-            try:
-                self.scene_generator.save_scenes(scenes_data, str(scenes_path), project_info)
-                project_info["scenes_path"] = str(scenes_path)
-                logger.info(f"[{project_id}] Datos de {len(scenes_data)} escenas guardados en {scenes_path}")
-            except Exception as save_e:
-                logger.error(f"[{project_id}] Error guardando scenes.json via scene_generator: {save_e}", exc_info=True)
-                project_info["scenes_path"] = None
-
-            # --- AÑADIR ESTA LÍNEA DE DEBUG ---
-            logger.info(f"[{project_id}] Número de escenas generadas: {len(scenes_data)}")
-            if not scenes_data:
-                logger.warning(f"[{project_id}] No se generó ninguna escena a partir del guion. Revisa el contenido del script y la lógica de SceneGenerator.")
+            if scenes_path.exists():
+                try:
+                    with open(scenes_path, 'r', encoding='utf-8') as f:
+                        scenes_data = json.load(f)
+                    logger.info(f"[{project_id}] Se encontraron {len(scenes_data)} escenas existentes. Se continuará desde la última.")
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"[{project_id}] No se pudo leer scenes.json ({e}), se regenerarán todas las escenas.")
+                    scenes_data = []
             else:
-                logger.info(f"[{project_id}] Escenas generadas exitosamente. Modo: {project_info.get('scene_generation_mode', 'No especificado')}")
-                for i, scene in enumerate(scenes_data[:3]):  # Solo mostrar las primeras 3 escenas para no saturar logs
-                    scene_desc = scene.get('description', scene.get('text', 'Sin descripción'))[:100]
-                    logger.info(f"[{project_id}] Escena {i+1}: {scene_desc}...")
-            # ------------------------------------
+                scenes_data = []
 
+            # Si no hay escenas, generarlas desde el principio
+            if not scenes_data:
+                 scenes_data = self.scene_generator.generate_scenes_from_script(
+                    script_content=script_content,
+                    transcription_segments=segments,
+                    mode=scenes_config.get("segmentation_mode", "Por Párrafos (Híbrido)"),
+                    project_info=project_info,
+                    image_prompt_config=image_prompt_config,
+                    ai_service=self.ai_service
+                )
+
+            # Lógica para reanudar la generación de prompts
+            if not all(s.get('image_prompt') for s in scenes_data):
+                logger.info(f"[{project_id}] Faltan prompts de imagen, generando...")
+                scenes_data = self.scene_generator.generate_image_prompts_for_scenes(
+                    scenes=scenes_data,
+                    project_info=project_info,
+                    image_prompt_config=image_prompt_config,
+                    ai_service=self.ai_service
+                )
+            
+            self._save_scenes(base_path, scenes_data)
+            project_info["scenes_path"] = str(scenes_path)
             project_info["image_prompts"] = [s.get('image_prompt', '[PROMPT FALTANTE]') for s in scenes_data]
             project_info["status"] = "scenes_ok"; self._save_project_info(base_path, project_info)
 
             # --- 5. Images --- 
-            logger.info(f"[{project_id}] Generando Imágenes...")
+            logger.info(f"[{project_id}] Iniciando generación de imágenes...")
+            # Lógica para reanudar la generación de imágenes
+            images_path = base_path / "images"
+            images_path.mkdir(exist_ok=True)
+            existing_images = [f.stem for f in images_path.glob("scene_*.webp")]
+
             image_paths = []
-            images_dir = base_path / "images"
-            # Usar project_info["image_prompts"] que se actualizó
-            num_prompts = len(project_info["image_prompts"])
-            if num_prompts == 0:
-                 raise ValueError("No hay prompts de imagen para generar imágenes.")
+            for i, scene in enumerate(scenes_data):
+                scene_name = f"scene_{i:03d}"
+                image_path = images_path / f"{scene_name}.webp"
+                
+                if scene_name in existing_images and image_path.exists():
+                    logger.info(f"[{project_id}] La imagen para la escena {i+1} ya existe. Saltando.")
+                    image_paths.append(str(image_path))
+                    continue
 
-            for idx, prompt_text in enumerate(project_info["image_prompts"]):
-                if not prompt_text or "[PROMPT FALTANTE]" in prompt_text or "[ERROR]" in prompt_text:
-                    logger.warning(f"[{project_id}] Omitiendo generación de imagen para escena {idx+1} debido a prompt inválido: {prompt_text}")
-                    # Añadir un placeholder o manejar cómo se alinea esto con scene_durations
-                    # Por ahora, se omitirá, lo que causará un desajuste si create_video_from_images espera una imagen por duración.
-                    # Esto necesitará manejo en create_video_from_images o aquí (ej. usando imagen placeholder)
-                    continue # Saltar este prompt
-
-                img_filename = f"scene_{idx:03d}.{image_config_ui.get('output_format', 'webp')}"
-                img_path = images_dir / img_filename
-                logger.info(f"[{project_id}] Solicitando imagen {idx+1}/{num_prompts} para: '{prompt_text[:60]}...' -> {img_path.name}")
+                logger.info(f"[{project_id}] Generando imagen para la escena {i+1}/{len(scenes_data)}...")
                 try:
-                    # --- AÑADIR LOGGING MEJORADO ---
-                    logger.info(f"[{project_id}] Enviando solicitud de imagen al proveedor Replicate con el prompt: '{prompt_text[:100]}...'")
-                    
-                    img_result = self.ai_service.generate_image(
-                        prompt=prompt_text, 
-                        model=image_config_ui.get('img_model', 'black-forest-labs/flux-schnell'), # Usar el modelo correcto
-                        aspect_ratio=image_config_ui.get('aspect_ratio', '16:9'), 
-                        output_format=image_config_ui.get('output_format', 'webp'),
-                        output_quality=image_config_ui.get('output_quality', 85), 
-                        megapixels=image_config_ui.get('megapixels', '1'), # O el default de tu servicio
-                        output_path=str(img_path)
+                    generated_path = self.image_generator.generate_image(
+                        prompt=scene.get("image_prompt"),
+                        output_path=str(image_path),
+                        config=image_prompt_config
                     )
-                    
-                    # --- AÑADIR ESTE LOG PARA VER QUÉ SE RECIBE ---
-                    logger.info(f"[{project_id}] Respuesta recibida de la API de imagen: {type(img_result)} - {str(img_result)[:100] if img_result else 'None'}...")
-                    
-                    # --- LÓGICA MEJORADA PARA MANEJAR RESPUESTAS ---
-                    if img_result:
-                        if isinstance(img_result, str):
-                            if img_result.startswith('http://') or img_result.startswith('https://'):
-                                # Es una URL, descarguemos la imagen
-                                logger.info(f"[{project_id}] Respuesta es una URL. Descargando imagen desde {img_result}")
-                                import requests
-                                response = requests.get(img_result)
-                                response.raise_for_status() # Lanza un error si la descarga falla
-                                with open(img_path, 'wb') as f:
-                                    f.write(response.content)
-                                image_paths.append(str(img_path))
-                                logger.info(f"[{project_id}] Imagen {idx+1} descargada y guardada: {img_path}")
-                            elif Path(img_result).exists():
-                                # Es una ruta de archivo local
-                                image_paths.append(img_result)
-                                logger.info(f"[{project_id}] Imagen {idx+1} generada: {img_result}")
-                            else:
-                                logger.warning(f"[{project_id}] Ruta de imagen no válida: {img_result}")
-                        elif isinstance(img_result, bytes):
-                            # Es datos binarios de imagen
-                            logger.info(f"[{project_id}] Respuesta son datos binarios. Guardando imagen...")
-                            with open(img_path, 'wb') as f:
-                                f.write(img_result)
-                            image_paths.append(str(img_path))
-                            logger.info(f"[{project_id}] Imagen {idx+1} guardada desde datos binarios: {img_path}")
-                        elif hasattr(img_result, 'save'):
-                            # Es un objeto de imagen (ej. PIL)
-                            logger.info(f"[{project_id}] Respuesta es objeto imagen. Guardando...")
-                            img_result.save(img_path)
-                            image_paths.append(str(img_path))
-                            logger.info(f"[{project_id}] Imagen {idx+1} guardada desde objeto: {img_path}")
-                        else:
-                            logger.warning(f"[{project_id}] Formato de salida no soportado: {type(img_result)} - {img_result}")
+                    if generated_path:
+                        image_paths.append(generated_path)
+                        scene["image_path"] = generated_path
                     else:
-                        logger.warning(f"[{project_id}] No se generó la imagen {idx+1} (respuesta vacía)")
-                        
-                except Exception as img_e: 
-                    logger.error(f"[{project_id}] Error generando imagen {idx+1} para prompt '{prompt_text[:60]}...': {img_e}", exc_info=True)
-                    # Considerar añadir placeholder
+                        logger.error(f"[{project_id}] Falló la generación de imagen para la escena {i+1}. Prompt: {scene.get('image_prompt')}")
+                        # Opcional: añadir una imagen placeholder para no detener el proceso
+                        # image_paths.append(str(self.assets_dir / "placeholder.webp"))
+
+                except Exception as img_e:
+                    logger.error(f"[{project_id}] Excepción al generar imagen para la escena {i+1}: {img_e}")
             
-            project_info["image_paths"] = image_paths # Actualizar con las rutas realmente generadas
-            if not project_info.get("image_paths"):
-                 raise ValueError("No se generaron imágenes válidas para las escenas.")
+            project_info["image_paths"] = image_paths
+            if len(image_paths) != len(scenes_data):
+                 raise ValueError("No se generaron imágenes válidas para todas las escenas.")
             logger.info(f"[{project_id}] {len(project_info['image_paths'])} imágenes generadas y válidas.")
             project_info["status"] = "images_ok"; self._save_project_info(base_path, project_info)
 
@@ -1144,23 +1051,26 @@ class VideoProcessor:
                          # Cargar el overlay de video
                          overlay_clip_obj = VideoFileClip(str(overlay_path), has_mask=True).set_opacity(opacity)
                          
-                         # Verificar duración del overlay vs video principal
-                         overlay_duration = overlay_clip_obj.duration
+                         # Obtener la duración del video principal
                          video_duration = final_clip.duration
                          
-                         logger.info(f"Overlay {overlay_path.name}: duración {overlay_duration:.2f}s, video: {video_duration:.2f}s")
+                         logger.info(f"Overlay {overlay_path.name}: duración original {overlay_clip_obj.duration:.2f}s, video principal: {video_duration:.2f}s")
                          
-                         if should_loop and overlay_duration < video_duration:
-                             # Solo hacer loop si el overlay es más corto que el video
+                         if should_loop and overlay_clip_obj.duration < video_duration:
+                             # Aplicar loop si es necesario y el overlay es más corto
                              overlay_clip_obj = loop(overlay_clip_obj, duration=video_duration)
                              logger.info(f"Overlay {overlay_path.name} en loop para {video_duration:.2f}s")
-                         elif overlay_duration > video_duration:
-                             # Si el overlay es más largo, cortarlo
+                         
+                         # Asegurarse de que el overlay tenga exactamente la duración del video principal
+                         # Esto es crucial para evitar que MoviePy intente leer más allá.
+                         if overlay_clip_obj.duration > video_duration:
                              overlay_clip_obj = overlay_clip_obj.subclip(0, video_duration)
-                             logger.info(f"Overlay {overlay_path.name} cortado a {video_duration:.2f}s")
-                         else:
-                             # Si tienen la misma duración o el overlay es más corto sin loop
+                             logger.info(f"Overlay {overlay_path.name} cortado a la duración del video principal ({video_duration:.2f}s)")
+                         elif overlay_clip_obj.duration < video_duration:
+                             # Si por alguna razón (ej. no loop y más corto) sigue siendo más corto, extenderlo
+                             # Esto es un fallback, la lógica de loop debería manejarlo.
                              overlay_clip_obj = overlay_clip_obj.set_duration(video_duration)
+                             logger.info(f"Overlay {overlay_path.name} extendido a la duración del video principal ({video_duration:.2f}s)")
                     else: 
                          # Asumir imagen
                          overlay_clip_obj = ImageClip(str(overlay_path), ismask=True).set_opacity(opacity)

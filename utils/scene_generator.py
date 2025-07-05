@@ -1034,6 +1034,9 @@ class SceneGenerator:
                     if 'character_description' in template_variables:
                         logger.info(f"[Escena {i+1}] 🎭 Descripción integrada en prompt histórico")
             
+            # DEBUG: Mostrar las variables filtradas antes de formatear el user_prompt
+            logger.debug(f"[Escena {i+1}] DEBUG - filtered_variables antes de formatear user_prompt: {filtered_variables}")
+
             try:
                 user_prompt = user_prompt_template.format(**filtered_variables)
             except KeyError as e:
@@ -1157,9 +1160,9 @@ class SceneGenerator:
                 with open(debug_file_path, 'a', encoding='utf-8') as f:
                     f.write(f"--- Escena {i+1} ---\n")
                     f.write(f"### System Prompt (LLM) ###\n")
-                    f.write(f"""""{system_prompt}"""""\n\n")
+                    f.write(f"""{system_prompt}\n""")
                     f.write(f"### User Prompt (LLM) ###\n")
-                    f.write(f"""""{user_prompt}"""""\n\n")
+                    f.write(f"""{user_prompt}\n""")
                     f.write(f"### Final Image Prompt ###\n")
                     f.write(f"{scene['image_prompt']}\n\n")
                 logger.info(f"[Escena {i+1}] Prompts de depuración guardados en {debug_file_path}")

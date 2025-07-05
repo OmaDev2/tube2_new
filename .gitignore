@@ -20,7 +20,7 @@ background_music/
 
 # Archivos de proyecto
 projects/
-*.mp4
+*.mp4/
 *.mov
 *.wav
 *.mp3
@@ -64,15 +64,3 @@ test_*.*
 /data/
 /temp/
 /cache/
-/cache/
-/cache/
-/cache/
-/cache/
-/cache/ 
-/projects/
-/projects/
-/projects/
-/projects/
-/projects/
-/projects/
-/projects/

@@ -63,11 +63,12 @@ class TransitionEffect:
             if t < start_time:
                 return clip1.get_frame(t)
             elif t >= clip1.duration:
-                return clip2.get_frame(t - start_time)
+                # Ensure the time index for clip2 does not exceed its duration
+                return clip2.get_frame(min(t - start_time, clip2.duration - 0.001))
             else:
                 progress = (t - start_time) / duration
                 frame1 = clip1.get_frame(t)
-                frame2 = clip2.get_frame(t - start_time)
+                frame2 = clip2.get_frame(min(t - start_time, clip2.duration - 0.001))
                 return blend(frame1, frame2, progress)
         
         final_duration = clip1.duration + clip2.duration - duration

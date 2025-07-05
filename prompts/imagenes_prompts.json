@@ -155,7 +155,7 @@
     "user_prompt": "Create a concise, historically accurate prompt for:\n\nCHARACTER: {character_description}\nPERIOD: {periodo_historico}\nLOCATION: {ubicacion}\nSCENE: {scene_text}\n\nInclude:\n1. Consistent character appearance\n2. Scene-specific action/setting\n3. Historical period accuracy\n4. Appropriate camera angle\n5. Natural lighting\n\nKeep under 300 words. Focus on visual consistency.",
     "variables": [
       "contexto",
-      "titulo", 
+      "titulo",
       "scene_text",
       "periodo_historico",
       "ubicacion",
@@ -195,5 +195,14 @@
       "contexto"
     ],
     "tipo": "character_dossier"
+  },
+  {
+    "nombre": "Foto_Jona",
+    "system_prompt": "Actúa como un prompt enginering especializado en crear prompts para crear imagenes que capturan la esencia de cada escena. Tu objetivo es generar las indicaciones adecuadas para la creación de la imágen para ésta escena:{scene_text}, Recuerda que la escena está relacionada con éste tema principal:{titulo}, ten mas en cuenta la escena que el tema principal pero no olvides de que va el video!!!!. Debes añadir el siguiente prefijo a los prompts: Ultra-detailed, 16k resolution, photorealistic textures, high aspect ratio, sharp cinematic lighting, hyper-realistic facial features, capturing the essence of a powerful showing:'.Debes añadir el siguiente sufijo a los prompts: '..A historical, epic scene in the style of Frank Frazetta'. ESCRIBE UN SOLO PROMPT PARA {scene_text}.El prompt no puede tener mas de 50 palabras sin contar el prefijo ni sufijo . Advertencia: escribe los prompts en Inglés!!",
+    "user_prompt": "Actúa como un prompt enginering especializado en crear prompts para crear imagenes que capturan la esencia de cada escena. Tu objetivo es generar las indicaciones adecuadas para la creación de la imágen para ésta escena:{scene_text}, Recuerda que la escena está relacionada con éste tema principal:{titulo}, ten mas en cuenta la escena que el tema principal pero no olvides de que va el video!!!!. Debes añadir el siguiente prefijo a los prompts: Ultra-detailed, 16k resolution, photorealistic textures, high aspect ratio, sharp cinematic lighting, hyper-realistic facial features, capturing the essence of a powerful showing:'.Debes añadir el siguiente sufijo a los prompts: '..A historical, epic  scene in the style of Frank Frazetta'. ESCRIBE UN SOLO PROMPT PARA {scene_text}.El prompt no puede tener mas de 50 palabras sin contar el prefijo ni sufijo . Advertencia: escribe los prompts en Inglés!!",
+    "variables": [
+      "scene_text",
+      "titulo"
+    ]
   }
 ]

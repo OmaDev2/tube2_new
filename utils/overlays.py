@@ -1,6 +1,7 @@
 # utils/overlays.py
 
 from moviepy.editor import VideoFileClip, CompositeVideoClip
+from moviepy.video.fx.all import loop
 from typing import List, Tuple, Optional, Dict
 import os
 import logging
@@ -44,7 +45,7 @@ class OverlayManager:
             return None
 
         try:
-            overlay_clip = VideoFileClip(overlay_path, has_mask=True)
+            overlay_clip = VideoFileClip(overlay_path)
             self._overlay_cache[overlay_name] = overlay_clip
             logger.info(f"Overlay '{overlay_name}' cargado y cacheado.")
             return overlay_clip
@@ -77,19 +78,24 @@ class OverlayManager:
                 overlay_processed = overlay_original
                 native_duration = overlay_original.duration
 
+                # Lógica de bucle y recorte para asegurar la duración correcta del overlay
+                overlay_processed = overlay_original
+                native_duration = overlay_original.duration
+
                 if native_duration < target_duration:
-                    logger.info(f"Overlay '{overlay_name}' (Dur: {native_duration:.2f}s) es más corto que el objetivo ({target_duration:.2f}s). Aplicando extensión sin bucle.")
-                    # SOLUCIÓN DEFINITIVA: Usar solo extensión de duración, NO concatenación
-                    # Esto evita completamente los problemas de frames inexistentes
-                    overlay_processed = overlay_original.set_duration(target_duration)
-                    logger.info(f"Overlay '{overlay_name}' extendido a {target_duration:.2f}s usando repetición del último frame.")
-                    
-                elif native_duration > target_duration:
-                    logger.info(f"Overlay '{overlay_name}' es más largo. Recortando a {target_duration:.2f}s.")
-                    overlay_processed = overlay_original.subclip(0, target_duration)
-                else:
-                    # La duración es la misma, no se hace nada
-                    overlay_processed = overlay_original.set_duration(target_duration)
+                    # Si el overlay es más corto, lo bucleamos para que sea al menos tan largo como el objetivo
+                    # Añadimos un poco extra para evitar problemas de redondeo
+                    overlay_processed = overlay_original.fx(loop, duration=target_duration + 1.0)
+                    logger.info(f"Overlay '{overlay_name}' bucleado. Duración original: {native_duration:.2f}s, bucleado a: {overlay_processed.duration:.2f}s")
+                
+                # Recortar el overlay a la duración exacta del clip base
+                if overlay_processed.duration > target_duration:
+                    overlay_processed = overlay_processed.subclip(0, target_duration)
+                    logger.info(f"Overlay '{overlay_name}' recortado a la duración objetivo: {target_duration:.2f}s")
+                elif overlay_processed.duration < target_duration:
+                    # Esto debería ser un caso raro si el bucle funciona, pero como fallback
+                    overlay_processed = overlay_processed.set_duration(target_duration)
+                    logger.warning(f"Overlay '{overlay_name}' duración ajustada a {target_duration:.2f}s (era más corto y no se bucleó correctamente o no se pudo recortar).")
 
                 # Aplicar resto de transformaciones
                 final_overlay = (overlay_processed
