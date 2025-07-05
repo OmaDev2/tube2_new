@@ -270,6 +270,51 @@ def show_video_generator():
                     voice_over_clip = afx.audio_normalize(voice_over_clip)
                 voice_over_clip = voice_over_clip.volumex(voice_volume)
             
+            # Procesar voz en off si se proporciona
+            voice_over_clip = None
+            if voice_over:
+                temp_voice = os.path.join("temp", voice_over.name)
+                with open(temp_voice, "wb") as f:
+                    f.write(voice_over.getbuffer())
+                voice_over_clip = AudioFileClip(temp_voice)
+                if normalize_voice:
+                    voice_over_clip = afx.audio_normalize(voice_over_clip)
+                voice_over_clip = voice_over_clip.volumex(voice_volume)
+            
+            # --- INICIO DE LA CORRECCIÓN POR TRANSICIONES ---
+            # Asumiendo que voice_over_clip ya ha sido cargado y tiene una duración válida
+            # Y que transition_duration ya está definido
+            
+            num_scenes = len(temp_images)
+
+            if num_scenes > 1 and transition_duration > 0 and voice_over_clip is not None:
+                # 1. Calcular el tiempo total que se perderá por la superposición de transiciones.
+                total_overlap_time = (num_scenes - 1) * transition_duration
+                st.info(f"Ajustando duraciones de {num_scenes} escenas para compensar {transition_duration}s de transición...")
+                st.info(f"Tiempo total de superposición a compensar: {total_overlap_time:.2f}s")
+
+                # 2. Calcular la duración objetivo que debe tener la suma de todos los clips.
+                #    Debe ser la duración del audio MÁS el tiempo que se perderá.
+                audio_duration = voice_over_clip.duration
+                target_clips_total_duration = audio_duration + total_overlap_time
+                st.info(f"Duración objetivo total de los clips (incluyendo compensación): {target_clips_total_duration:.2f}s")
+
+                # 3. Calcular la duración total actual de las escenas (basada en duration_per_image).
+                current_scenes_total_duration = num_scenes * duration_per_image
+                
+                if current_scenes_total_duration <= 0:
+                    st.error("La duración total actual de las escenas es 0. No se puede realizar el ajuste.")
+                else:
+                    # 4. Calcular un factor de ajuste.
+                    adjustment_factor = target_clips_total_duration / current_scenes_total_duration
+                    st.info(f"Factor de ajuste de duración: {adjustment_factor:.4f}")
+
+                    # 5. Recalcular la duración por imagen.
+                    duration_per_image = duration_per_image * adjustment_factor
+                    st.success(f"Nueva duración por imagen ajustada: {duration_per_image:.2f}s")
+
+            # --- FIN DE LA CORRECCIÓN ---
+
             # Crear el video con callback de progreso
             output_path = video_service.create_video_from_images(
                 images=temp_images,

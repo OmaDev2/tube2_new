@@ -35,6 +35,7 @@ __pycache__/
 .env
 *.env
 *.log
+*.mp4
 
 # Archivos de Streamlit
 .streamlit/

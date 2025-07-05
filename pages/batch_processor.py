@@ -200,6 +200,140 @@ def show_batch_processor():
     
     st.markdown("---")
     
+    # ===== SECCIÓN 2: RE-PROCESAR PROYECTOS EXISTENTES =====
+    st.header("2. 🔧 Re-procesar o Reparar Proyecto Existente")
+    
+    # Función para obtener la lista de proyectos existentes
+    def get_existing_projects(projects_dir="projects"):
+        projects_path = Path(projects_dir)
+        if not projects_path.exists():
+            return []
+        return [d.name for d in projects_path.iterdir() if d.is_dir() and (d / "project_info.json").exists()]
+    
+    # Obtener la lista de proyectos
+    projects_dir = app_config.get("video_generation", {}).get("paths", {}).get("projects_dir", "projects")
+    existing_projects = get_existing_projects(projects_dir)
+    
+    if not existing_projects:
+        st.warning("📁 No se encontraron proyectos existentes para re-procesar.")
+    else:
+        # Crear un selector para que el usuario elija el proyecto
+        selected_project_id = st.selectbox(
+            "🎯 Selecciona un proyecto para re-procesar",
+            options=existing_projects,
+            index=None,
+            placeholder="Elige un proyecto...",
+            help="Selecciona un proyecto existente para reanudar su procesamiento desde donde se quedó"
+        )
+        
+        if selected_project_id:
+            # Cargar información del proyecto seleccionado
+            project_dir = Path(projects_dir) / selected_project_id
+            project_info_path = project_dir / "project_info.json"
+            
+            try:
+                with open(project_info_path, 'r', encoding='utf-8') as f:
+                    project_info = json.load(f)
+                
+                # Mostrar información del proyecto
+                st.subheader(f"📋 Información del Proyecto: {selected_project_id}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"**Título:** {project_info.get('title', 'N/A')}")
+                    st.write(f"**Estado:** {project_info.get('status', 'N/A')}")
+                    st.write(f"**Fecha:** {project_info.get('created_at', 'N/A')}")
+                
+                with col2:
+                    st.write(f"**Duración Audio:** {project_info.get('audio_duration', 0):.1f}s")
+                    st.write(f"**Imágenes:** {len(project_info.get('image_paths', []))}")
+                    st.write(f"**Escenas:** {len(project_info.get('scenes', [])) if project_info.get('scenes') else 'N/A'}")
+                
+                # Mostrar estado detallado
+                status = project_info.get('status', 'unknown')
+                status_icon = {
+                    'script_ok': '📝',
+                    'audio_ok': '🔊', 
+                    'transcription_ok': '🎯',
+                    'scenes_ok': '🎬',
+                    'images_ok': '🖼️',
+                    'video_ok': '🎥',
+                    'error_en_transcription_ok': '⚠️',
+                    'unknown': '❓'
+                }.get(status, '❓')
+                
+                st.info(f"{status_icon} **Estado actual:** {status}")
+                
+                # Mostrar error si existe
+                if project_info.get('error'):
+                    st.error(f"❌ **Error anterior:** {project_info['error']}")
+                
+                # Botón de re-procesamiento
+                if st.button(f"🚀 Reanudar Procesamiento", type="primary", use_container_width=True):
+                    with st.spinner(f"🔄 Reanudando el procesamiento para {selected_project_id}..."):
+                        try:
+                            # Importar el procesador de video
+                            from utils.video_processing import VideoProcessor
+                            
+                            # Crear la instancia del procesador
+                            video_processor = VideoProcessor(config=app_config)
+                            
+                            # Obtener la configuración completa de la UI
+                            full_config = get_full_config_from_ui(app_config)
+                            
+                            # Reanudar el procesamiento
+                            final_video_path = video_processor.process_single_video(
+                                full_config=full_config,
+                                existing_project_info=project_info
+                            )
+                            
+                            if final_video_path and final_video_path.exists():
+                                st.success(f"✅ ¡Proyecto '{selected_project_id}' completado exitosamente!")
+                                st.video(str(final_video_path))
+                                
+                                # Mostrar información del video final
+                                st.info(f"📁 **Video guardado en:** {final_video_path}")
+                                st.info(f"⏱️ **Duración:** {project_info.get('audio_duration', 0):.1f} segundos")
+                            else:
+                                st.error(f"❌ El procesamiento para '{selected_project_id}' falló. Revisa los logs.")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Ocurrió un error crítico al re-procesar: {e}")
+                            st.exception(e)
+                
+                # Botón para ver el video existente si existe
+                video_path = project_dir / "video" / f"{selected_project_id}_final_subtitled.mp4"
+                if video_path.exists():
+                    st.subheader("🎥 Video Actual")
+                    st.video(str(video_path))
+                    
+                    col_v1, col_v2 = st.columns(2)
+                    with col_v1:
+                        if st.button("📁 Abrir carpeta del proyecto", key=f"open_folder_{selected_project_id}"):
+                            import subprocess
+                            try:
+                                subprocess.run(["open", str(project_dir)])
+                                st.success("📁 Carpeta abierta!")
+                            except:
+                                st.info(f"📁 Ruta del proyecto: {project_dir}")
+                    
+                    with col_v2:
+                        if st.button("🗑️ Eliminar proyecto", key=f"delete_project_{selected_project_id}", type="secondary"):
+                            st.warning("⚠️ Esta acción eliminará completamente el proyecto y todos sus archivos.")
+                            if st.button("✅ Confirmar eliminación", key=f"confirm_delete_{selected_project_id}", type="primary"):
+                                import shutil
+                                try:
+                                    shutil.rmtree(project_dir)
+                                    st.success(f"✅ Proyecto '{selected_project_id}' eliminado!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Error al eliminar: {e}")
+                
+            except Exception as e:
+                st.error(f"❌ Error al cargar el proyecto: {e}")
+    
+    st.markdown("---")
+    
     # ===== SECCIÓN 2: CONFIGURACIÓN DE INTELIGENCIA ARTIFICIAL =====
     st.header("2. 🤖 Configuración de Inteligencia Artificial")
     
@@ -569,6 +703,23 @@ def show_batch_processor():
                 default_provider = app_config.get('ai', {}).get('default_models', {}).get('openai', 'gpt-4o-mini')
                 optimization_config['optimization_provider'] = 'openai'  # Fallback
                 optimization_config['optimization_model'] = default_provider  # Fallback
+    
+    # Función para obtener la configuración completa de la UI
+    def get_full_config_from_ui(app_config):
+        """Recolecta toda la configuración de la UI para el procesamiento"""
+        full_config = {
+            "ai": app_config.get("ai", {}),
+            "tts": app_config.get("tts", {}),
+            "transcription": app_config.get("transcription", {}),
+            "image": app_config.get("image", {}),
+            "video": app_config.get("video", {}),
+            "audio": app_config.get("audio", {}),
+            "subtitles": app_config.get("subtitles", {}),
+            "scenes_config": app_config.get("scenes_config", {}),
+            "effects": app_config.get("effects", {}),
+            "overlays": app_config.get("overlays", {})
+        }
+        return full_config
     
     # ===== SECCIÓN 3: CONFIGURACIÓN DE CONTENIDO =====
     st.header("3. 🎬 Configuración de Contenido")

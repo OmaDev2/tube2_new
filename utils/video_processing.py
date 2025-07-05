@@ -377,7 +377,9 @@ class VideoProcessor:
             if scenes_path.exists():
                 try:
                     with open(scenes_path, 'r', encoding='utf-8') as f:
-                        scenes_data = json.load(f)
+                        scenes_json = json.load(f)
+                    # Extraer la lista de escenas del JSON completo
+                    scenes_data = scenes_json.get('scenes', [])
                     logger.info(f"[{project_id}] Se encontraron {len(scenes_data)} escenas existentes. Se continuará desde la última.")
                 except (json.JSONDecodeError, IOError) as e:
                     logger.warning(f"[{project_id}] No se pudo leer scenes.json ({e}), se regenerarán todas las escenas.")
@@ -405,8 +407,9 @@ class VideoProcessor:
                     image_prompt_config=image_prompt_config,
                     ai_service=self.ai_service
                 )
-            
-            self._save_scenes(base_path, scenes_data)
+        
+            scenes_path = self.scene_generator.save_scenes(scenes_data, str(scenes_path), project_info)
+            #self._save_scenes(base_path, scenes_data)
             project_info["scenes_path"] = str(scenes_path)
             project_info["image_prompts"] = [s.get('image_prompt', '[PROMPT FALTANTE]') for s in scenes_data]
             project_info["status"] = "scenes_ok"; self._save_project_info(base_path, project_info)
@@ -893,11 +896,11 @@ class VideoProcessor:
             # Limpieza de archivos temporales ya no necesaria con el nuevo manejo de audio
 
 
-        if project_info.get("status") != "completado": 
-            logger.warning(f"[{project_info.get('id', 'UNKNOWN')}] Proceso no completado, estado: {project_info.get('status')}")
-            return None # Devuelve None si no se completó
+            if project_info.get("status") != "completado": 
+                logger.warning(f"[{project_info.get('id', 'UNKNOWN')}] Proceso no completado, estado: {project_info.get('status')}")
+                return None # Devuelve None si no se completó
         
-        return final_video_path
+            return final_video_path
 
     # --- Métodos Auxiliares --- 
 
