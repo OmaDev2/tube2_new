@@ -20,6 +20,80 @@ try:
 except ImportError as e:
     st.error(f"Error importando dependencias: {e}")
 
+def get_full_config_from_ui(app_config: dict) -> dict:
+    """
+    Recolecta todos los valores de los widgets de Streamlit de la UI
+    y los ensambla en un único diccionario de configuración.
+    """
+    st.info("🔄 Recolectando configuración actual de la interfaz...")
+    
+    config = {
+        "script": {},
+        "audio": {},
+        "scenes_config": {},
+        "image": {},
+        "video": {},
+        "subtitles": {},
+        "generate_optimized_content": False
+    }
+
+    # --- Script Config ---
+    config["script"]["mode"] = "Generar con IA"  # Para re-procesamiento siempre usar IA o existente
+    
+    # --- Audio (TTS) Config ---
+    config["audio"]["tts_provider"] = st.session_state.get("batch_tts_provider", "fish")
+    config["audio"]["tts_voice"] = st.session_state.get("batch_edge_voice", "es-ES-AlvaroNeural")
+    config["audio"]["tts_speed_percent"] = st.session_state.get("batch_edge_speed", 0)
+    config["audio"]["tts_pitch_hz"] = st.session_state.get("batch_edge_pitch", 0)
+    config["audio"]["tts_fish_model"] = st.session_state.get("batch_fish_model", "spanish")
+    config["audio"]["bg_music_selection"] = st.session_state.get("batch_bg_music_selection", "")
+    config["audio"]["bg_music_volume"] = st.session_state.get("batch_bg_music_volume", 0.1)
+
+    # --- Escenas Config ---
+    config["scenes_config"]["segmentation_mode"] = st.session_state.get("batch_segmentation_mode", "Por Párrafos (Híbrido)")
+    config["scenes_config"]["max_scene_duration"] = st.session_state.get("batch_max_scene_duration", 12.0)
+    config["scenes_config"]["use_auto_duration"] = st.session_state.get("batch_use_auto_duration", True)
+    config["scenes_config"]["duration_per_image_manual"] = st.session_state.get("batch_duration_manual", 10.0)
+
+    # --- Imagen Config ---
+    config["image"]["img_provider"] = "replicate"
+    config["image"]["img_model"] = "black-forest-labs/flux-schnell"
+    config["image"]["aspect_ratio"] = st.session_state.get("batch_img_aspect", "16:9")
+    config["image"]["output_format"] = st.session_state.get("batch_img_format", "webp")
+    config["image"]["output_quality"] = st.session_state.get("batch_img_quality", 85)
+    config["image"]["megapixels"] = st.session_state.get("batch_img_mp", "1")
+
+    # --- Video Config ---
+    config["video"]["transition_type"] = st.session_state.get("batch_transition_type", "dissolve")
+    config["video"]["transition_duration"] = st.session_state.get("batch_transition_duration", 1.0)
+    config["video"]["fade_in"] = st.session_state.get("batch_fade_in", 1.0)
+    config["video"]["fade_out"] = st.session_state.get("batch_fade_out", 1.0)
+    
+    # Recolectar efectos y overlays
+    config["video"]["effects"] = st.session_state.get("batch_selected_effects", [])
+    config["video"]["overlays"] = st.session_state.get("batch_selected_overlays", [])
+
+    # --- Subtítulos Config ---
+    config["subtitles"]["enable"] = st.session_state.get("batch_sub_enable", True)
+    config["subtitles"]["font"] = st.session_state.get("batch_sub_font", "Arial-Bold")
+    config["subtitles"]["size"] = st.session_state.get("batch_sub_size", 24)
+    config["subtitles"]["color"] = st.session_state.get("batch_sub_color", "white")
+    config["subtitles"]["stroke_color"] = st.session_state.get("batch_sub_stroke_color", "black")
+    config["subtitles"]["stroke_width"] = st.session_state.get("batch_sub_stroke_width", 2)
+    config["subtitles"]["position"] = st.session_state.get("batch_sub_pos", "bottom")
+    config["subtitles"]["max_words"] = st.session_state.get("batch_sub_max_words", 8)
+
+    # --- Contenido Optimizado ---
+    config["generate_optimized_content"] = st.session_state.get("batch_optimize_content", False)
+    
+    # --- Configuración base de app_config ---
+    config["ai"] = app_config.get("ai", {})
+    config["tts"] = app_config.get("tts", {})
+    config["transcription"] = app_config.get("transcription", {})
+
+    st.success("✅ Configuración recolectada exitosamente!")
+    return config
+
 def show_batch_processor():
     st.title("🚀 Procesador por Lotes de Videos")
     
@@ -704,22 +778,7 @@ def show_batch_processor():
                 optimization_config['optimization_provider'] = 'openai'  # Fallback
                 optimization_config['optimization_model'] = default_provider  # Fallback
     
-    # Función para obtener la configuración completa de la UI
-    def get_full_config_from_ui(app_config):
-        """Recolecta toda la configuración de la UI para el procesamiento"""
-        full_config = {
-            "ai": app_config.get("ai", {}),
-            "tts": app_config.get("tts", {}),
-            "transcription": app_config.get("transcription", {}),
-            "image": app_config.get("image", {}),
-            "video": app_config.get("video", {}),
-            "audio": app_config.get("audio", {}),
-            "subtitles": app_config.get("subtitles", {}),
-            "scenes_config": app_config.get("scenes_config", {}),
-            "effects": app_config.get("effects", {}),
-            "overlays": app_config.get("overlays", {})
-        }
-        return full_config
+
     
     # ===== SECCIÓN 3: CONFIGURACIÓN DE CONTENIDO =====
     st.header("3. 🎬 Configuración de Contenido")
